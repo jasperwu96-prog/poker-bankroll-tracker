@@ -20,44 +20,51 @@ struct AddHandView: View {
     @State private var currentPlayerIndex = 0
     @State private var pot: Double = 0
     @State private var currentBet: Double = 0
-    @State private var roundComplete = false
+    @State private var lastRaiserIndex: Int = -1
+    @State private var actedThisRound: Set<Int> = []
 
     // UI State
     @State private var phase: RecordingPhase = .setup
     @State private var showingCardPicker = false
     @State private var cardPickerType: CardPickerType = .holeCards
+    @State private var showingBetInput = false
+    @State private var showingAllInInput = false
+    @State private var betAmount = ""
+    @State private var pendingAction: ActionType = .bet
 
     enum RecordingPhase {
-        case setup           // Select position and hole cards
-        case preflop         // Record preflop action
-        case flop            // Select flop cards then record action
-        case turn            // Select turn card then record action
-        case river           // Select river card then record action
-        case result          // Enter result
+        case setup
+        case action
+        case selectingFlop
+        case selectingTurn
+        case selectingRiver
+        case result
     }
 
     enum CardPickerType {
         case holeCards, flop, turn, river
     }
 
-    // Preflop order: UTG, UTG+1, MP, MP+1, HJ, CO, BTN, SB, BB
-    let preflopOrder = [3, 4, 5, 6, 7, 8, 0, 1, 2] // Position IDs in action order
-    // Postflop order: SB, BB, UTG, UTG+1, MP, MP+1, HJ, CO, BTN
+    // Preflop order: UTG(3), UTG+1(4), MP(5), MP+1(6), HJ(7), CO(8), BTN(0), SB(1), BB(2)
+    let preflopOrder = [3, 4, 5, 6, 7, 8, 0, 1, 2]
+    // Postflop order: SB(1), BB(2), UTG(3), UTG+1(4), MP(5), MP+1(6), HJ(7), CO(8), BTN(0)
     let postflopOrder = [1, 2, 3, 4, 5, 6, 7, 8, 0]
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Progress indicator
+                // Progress bar
                 progressBar
 
                 ScrollView {
-                    VStack(spacing: 20) {
+                    VStack(spacing: 16) {
                         switch phase {
                         case .setup:
                             setupPhase
-                        case .preflop, .flop, .turn, .river:
+                        case .action:
                             actionPhase
+                        case .selectingFlop, .selectingTurn, .selectingRiver:
+                            cardSelectionPhase
                         case .result:
                             resultPhase
                         }
@@ -82,11 +89,25 @@ struct AddHandView: View {
                 }
             }
             .sheet(isPresented: $showingCardPicker) {
-                cardPickerSheet
+                CardPickerView(
+                    selectedCards: cardPickerBinding,
+                    maxCards: maxCardsForPicker,
+                    excludedCards: excludedCardsForPicker
+                )
             }
-            .onAppear {
-                setupInitialState()
+            .alert("Enter Amount", isPresented: $showingBetInput) {
+                TextField("Amount", text: $betAmount)
+                    .keyboardType(.decimalPad)
+                Button("Cancel", role: .cancel) { betAmount = "" }
+                Button("Confirm") { confirmBetAction() }
             }
+            .alert("All-In Amount", isPresented: $showingAllInInput) {
+                TextField("Amount", text: $betAmount)
+                    .keyboardType(.decimalPad)
+                Button("Cancel", role: .cancel) { betAmount = "" }
+                Button("Confirm") { confirmAllInAction() }
+            }
+            .onAppear { setupInitialState() }
         }
     }
 
@@ -105,23 +126,21 @@ struct AddHandView: View {
     }
 
     private var phaseIndex: Int {
-        switch phase {
-        case .setup: return 0
+        switch currentStreet {
         case .preflop: return 1
         case .flop: return 2
         case .turn: return 3
         case .river: return 4
-        case .result: return 4
         }
     }
 
     private var phaseTitle: String {
         switch phase {
         case .setup: return "Setup Hand"
-        case .preflop: return "Preflop"
-        case .flop: return "Flop"
-        case .turn: return "Turn"
-        case .river: return "River"
+        case .action: return currentStreet.rawValue
+        case .selectingFlop: return "Deal Flop"
+        case .selectingTurn: return "Deal Turn"
+        case .selectingRiver: return "Deal River"
         case .result: return "Result"
         }
     }
@@ -130,22 +149,14 @@ struct AddHandView: View {
 
     private var setupPhase: some View {
         VStack(spacing: 24) {
-            // Session picker
             sessionPicker
-
             Divider()
-
-            // Hero position selector
             heroPositionSelector
-
             Divider()
-
-            // Hole cards
             holeCardsSelector
 
             Spacer().frame(height: 20)
 
-            // Start button
             Button {
                 startRecording()
             } label: {
@@ -269,80 +280,61 @@ struct AddHandView: View {
         }
     }
 
-    // MARK: - Action Phase
+    // MARK: - Action Phase (Bird's Eye View)
 
     private var actionPhase: some View {
-        VStack(spacing: 20) {
-            // Board cards display
-            if currentStreet != .preflop {
-                boardDisplay
-            }
+        VStack(spacing: 16) {
+            // Street indicator
+            streetIndicator
 
-            // Pot display
-            potDisplay
+            // Poker Table with current player highlighted
+            PokerTableView(
+                players: players,
+                communityCards: board,
+                pot: pot,
+                activePlayerIndex: getCurrentPlayerPositionId(),
+                onPlayerTap: nil
+            )
+            .frame(height: 240)
 
-            // Current player and action buttons
+            // Current player info and actions
             if let currentPlayer = getCurrentPlayer() {
-                currentPlayerDisplay(currentPlayer)
+                currentPlayerActionPanel(currentPlayer)
+            } else {
+                // All players have acted this round
+                roundCompletePanel
             }
 
             Divider()
 
-            // Action history
+            // Action history for current street
             actionHistory
-
-            // Skip to next street / End hand buttons
-            streetControls
         }
     }
 
-    private var boardDisplay: some View {
-        VStack(spacing: 8) {
-            Text("BOARD")
-                .font(.caption2)
-                .fontWeight(.medium)
-                .tracking(1)
-                .foregroundColor(.gray)
-
-            HStack(spacing: 8) {
-                ForEach(0..<5, id: \.self) { index in
-                    if index < board.count {
-                        CardView(card: board[index], size: .medium)
-                    } else {
+    private var streetIndicator: some View {
+        HStack(spacing: 16) {
+            ForEach(Street.allCases, id: \.self) { street in
+                Text(street.rawValue)
+                    .font(.caption)
+                    .fontWeight(currentStreet == street ? .bold : .regular)
+                    .foregroundColor(currentStreet == street ? .black : .gray)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
                         RoundedRectangle(cornerRadius: 6)
-                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [4]))
-                            .foregroundColor(.gray.opacity(0.3))
-                            .frame(width: 44, height: 60)
-                    }
-                }
+                            .fill(currentStreet == street ? Color.black.opacity(0.1) : Color.clear)
+                    )
             }
         }
     }
 
-    private var potDisplay: some View {
-        HStack {
-            Text("POT")
-                .font(.caption2)
-                .fontWeight(.medium)
-                .tracking(1)
-                .foregroundColor(.gray)
-
-            Spacer()
-
-            Text("$\(Int(pot))")
-                .font(.title2)
-                .fontWeight(.bold)
-        }
-        .padding()
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.03)))
-    }
-
-    private func currentPlayerDisplay(_ player: PlayerState) -> some View {
+    private func currentPlayerActionPanel(_ player: PlayerState) -> some View {
         VStack(spacing: 16) {
-            // Player info
+            // Player indicator
             HStack {
                 Text(player.position.shortName)
-                    .font(.title2)
+                    .font(.title3)
                     .fontWeight(.bold)
                     .foregroundColor(player.isHero ? .white : .black)
                     .padding(.horizontal, 16)
@@ -363,51 +355,97 @@ struct AddHandView: View {
                 if currentBet > 0 {
                     Text("To call: $\(Int(currentBet))")
                         .font(.subheadline)
+                        .fontWeight(.medium)
                         .foregroundColor(.gray)
                 }
             }
 
-            // Action buttons
-            actionButtons(for: player)
-        }
-    }
+            // Action buttons - 2x2 grid
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    actionButton("Fold", style: .outline) {
+                        recordAction(player: player, action: .fold, amount: nil)
+                    }
 
-    private func actionButtons(for player: PlayerState) -> some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                // Fold
-                actionButton(title: "Fold", color: .gray) {
-                    recordAction(player: player, action: .fold, amount: nil)
+                    if currentBet == 0 {
+                        actionButton("Check", style: .filled) {
+                            recordAction(player: player, action: .check, amount: nil)
+                        }
+                    } else {
+                        actionButton("Call $\(Int(currentBet))", style: .filled) {
+                            recordAction(player: player, action: .call, amount: currentBet)
+                        }
+                    }
                 }
 
-                // Check/Call
-                if currentBet == 0 {
-                    actionButton(title: "Check", color: .black) {
-                        recordAction(player: player, action: .check, amount: nil)
+                HStack(spacing: 10) {
+                    actionButton(currentBet == 0 ? "Bet" : "Raise", style: .outline) {
+                        pendingAction = currentBet == 0 ? .bet : .raise
+                        betAmount = ""
+                        showingBetInput = true
                     }
-                } else {
-                    actionButton(title: "Call $\(Int(currentBet))", color: .black) {
-                        recordAction(player: player, action: .call, amount: currentBet)
+
+                    actionButton("All-In", style: .outline) {
+                        betAmount = ""
+                        showingAllInInput = true
                     }
                 }
             }
+        }
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.02)))
+    }
 
-            HStack(spacing: 10) {
-                // Bet/Raise
-                actionButtonWithAmount(
-                    title: currentBet == 0 ? "Bet" : "Raise",
-                    player: player
-                )
+    private var roundCompletePanel: some View {
+        VStack(spacing: 16) {
+            Text("Round Complete")
+                .font(.headline)
+                .foregroundColor(.black)
 
-                // All-In
-                actionButton(title: "All-In", color: .black) {
-                    showAllInPrompt(player: player)
+            Button {
+                advanceToNextStreet()
+            } label: {
+                Text(nextStreetButtonTitle)
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.black)
+                    .cornerRadius(12)
+            }
+
+            if !actions.filter({ $0.street == currentStreet }).isEmpty {
+                Button {
+                    undoLastAction()
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.uturn.backward")
+                        Text("Undo Last Action")
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
                 }
             }
         }
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.02)))
     }
 
-    private func actionButton(title: String, color: Color, action: @escaping () -> Void) -> some View {
+    private var nextStreetButtonTitle: String {
+        switch currentStreet {
+        case .preflop: return "Deal Flop"
+        case .flop: return "Deal Turn"
+        case .turn: return "Deal River"
+        case .river: return "Finish Hand"
+        }
+    }
+
+    enum ButtonStyle {
+        case filled, outline
+    }
+
+    private func actionButton(_ title: String, style: ButtonStyle, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.subheadline)
@@ -416,79 +454,50 @@ struct AddHandView: View {
                 .padding(.vertical, 14)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(color == .black ? Color.black : Color.white)
+                        .fill(style == .filled ? Color.black : Color.white)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(Color.black, lineWidth: 1.5)
                 )
-                .foregroundColor(color == .black ? .white : .black)
+                .foregroundColor(style == .filled ? .white : .black)
         }
-    }
-
-    @State private var betAmount = ""
-    @State private var showingBetInput = false
-    @State private var pendingBetPlayer: PlayerState?
-
-    private func actionButtonWithAmount(title: String, player: PlayerState) -> some View {
-        Button {
-            pendingBetPlayer = player
-            betAmount = ""
-            showingBetInput = true
-        } label: {
-            Text(title)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.white)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.black, lineWidth: 1.5)
-                )
-                .foregroundColor(.black)
-        }
-        .alert("Enter Amount", isPresented: $showingBetInput) {
-            TextField("Amount", text: $betAmount)
-                .keyboardType(.decimalPad)
-            Button("Cancel", role: .cancel) { }
-            Button("Confirm") {
-                if let amount = Double(betAmount), let player = pendingBetPlayer {
-                    let actionType: ActionType = currentBet == 0 ? .bet : .raise
-                    recordAction(player: player, action: actionType, amount: amount)
-                }
-            }
-        }
-    }
-
-    @State private var showingAllInInput = false
-    @State private var allInAmount = ""
-
-    private func showAllInPrompt(player: PlayerState) {
-        pendingBetPlayer = player
-        allInAmount = ""
-        showingAllInInput = true
     }
 
     private var actionHistory: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("ACTIONS")
-                .font(.caption2)
-                .fontWeight(.medium)
-                .tracking(1)
-                .foregroundColor(.gray)
+            HStack {
+                Text("ACTIONS THIS STREET")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .tracking(1)
+                    .foregroundColor(.gray)
 
-            if actions.isEmpty {
+                Spacer()
+
+                if !actions.filter({ $0.street == currentStreet }).isEmpty {
+                    Button {
+                        undoLastAction()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.uturn.backward")
+                            Text("Undo")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    }
+                }
+            }
+
+            let streetActions = actions.filter { $0.street == currentStreet }
+            if streetActions.isEmpty {
                 Text("No actions yet")
                     .font(.caption)
                     .foregroundColor(.gray)
+                    .padding(.vertical, 4)
             } else {
-                let streetActions = actions.filter { $0.street == currentStreet }
                 ForEach(streetActions) { action in
-                    HStack {
+                    HStack(spacing: 8) {
                         Text(action.position)
                             .font(.caption)
                             .fontWeight(.semibold)
@@ -506,6 +515,7 @@ struct AddHandView: View {
                         if let amount = action.amount, amount > 0 {
                             Text("$\(Int(amount))")
                                 .font(.caption)
+                                .fontWeight(.medium)
                                 .foregroundColor(.gray)
                         }
 
@@ -516,57 +526,74 @@ struct AddHandView: View {
         }
     }
 
-    private var streetControls: some View {
-        HStack(spacing: 12) {
-            if !actions.filter({ $0.street == currentStreet }).isEmpty {
-                Button {
-                    undoLastAction()
-                } label: {
-                    HStack {
-                        Image(systemName: "arrow.uturn.backward")
-                        Text("Undo")
+    // MARK: - Card Selection Phase
+
+    private var cardSelectionPhase: some View {
+        VStack(spacing: 24) {
+            Text(cardSelectionTitle)
+                .font(.headline)
+
+            // Current board
+            HStack(spacing: 8) {
+                ForEach(0..<expectedBoardCards, id: \.self) { index in
+                    if index < board.count {
+                        CardView(card: board[index], size: .large)
+                    } else {
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
+                            .foregroundColor(.black.opacity(0.3))
+                            .frame(width: 56, height: 76)
                     }
-                    .font(.subheadline)
-                    .foregroundColor(.gray)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 8).stroke(Color.gray))
                 }
             }
 
-            Spacer()
-
             Button {
-                advanceToNextStreet()
+                showingCardPicker = true
             } label: {
-                Text(nextStreetButtonTitle)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
+                Text("Select Cards")
+                    .font(.headline)
+                    .fontWeight(.bold)
                     .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity)
+                    .padding()
                     .background(Color.black)
-                    .cornerRadius(8)
+                    .cornerRadius(12)
             }
-        }
-        .alert("All-In Amount", isPresented: $showingAllInInput) {
-            TextField("Amount", text: $allInAmount)
-                .keyboardType(.decimalPad)
-            Button("Cancel", role: .cancel) { }
-            Button("Confirm") {
-                if let amount = Double(allInAmount), let player = pendingBetPlayer {
-                    recordAction(player: player, action: .allIn, amount: amount)
+
+            if board.count == expectedBoardCards {
+                Button {
+                    continueAfterCardSelection()
+                } label: {
+                    Text("Continue")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.black, lineWidth: 2)
+                        )
                 }
             }
         }
     }
 
-    private var nextStreetButtonTitle: String {
-        switch currentStreet {
-        case .preflop: return "Deal Flop →"
-        case .flop: return "Deal Turn →"
-        case .turn: return "Deal River →"
-        case .river: return "Finish Hand →"
+    private var cardSelectionTitle: String {
+        switch phase {
+        case .selectingFlop: return "Select 3 Flop Cards"
+        case .selectingTurn: return "Select Turn Card"
+        case .selectingRiver: return "Select River Card"
+        default: return ""
+        }
+    }
+
+    private var expectedBoardCards: Int {
+        switch phase {
+        case .selectingFlop: return 3
+        case .selectingTurn: return 4
+        case .selectingRiver: return 5
+        default: return board.count
         }
     }
 
@@ -576,11 +603,35 @@ struct AddHandView: View {
         VStack(spacing: 24) {
             // Final board
             if !board.isEmpty {
-                boardDisplay
+                VStack(spacing: 8) {
+                    Text("FINAL BOARD")
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .tracking(1)
+                        .foregroundColor(.gray)
+
+                    HStack(spacing: 8) {
+                        ForEach(board) { card in
+                            CardView(card: card, size: .medium)
+                        }
+                    }
+                }
             }
 
             // Final pot
-            potDisplay
+            HStack {
+                Text("FINAL POT")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .tracking(1)
+                    .foregroundColor(.gray)
+                Spacer()
+                Text("$\(Int(pot))")
+                    .font(.title2)
+                    .fontWeight(.bold)
+            }
+            .padding()
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.03)))
 
             Divider()
 
@@ -604,7 +655,7 @@ struct AddHandView: View {
                 .padding()
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.03)))
 
-                Text("Enter positive for win, negative for loss")
+                Text("Positive = win, Negative = loss")
                     .font(.caption)
                     .foregroundColor(.gray)
             }
@@ -625,15 +676,7 @@ struct AddHandView: View {
         }
     }
 
-    // MARK: - Card Picker Sheet
-
-    private var cardPickerSheet: some View {
-        CardPickerView(
-            selectedCards: cardPickerBinding,
-            maxCards: maxCardsForPicker,
-            excludedCards: excludedCardsForPicker
-        )
-    }
+    // MARK: - Card Picker Bindings
 
     private var cardPickerBinding: Binding<[Card]> {
         switch cardPickerType {
@@ -642,35 +685,23 @@ struct AddHandView: View {
         case .flop:
             return Binding(
                 get: { Array(board.prefix(3)) },
-                set: { newCards in
-                    board = newCards + Array(board.dropFirst(3))
-                }
+                set: { board = $0 }
             )
         case .turn:
             return Binding(
                 get: { board.count > 3 ? [board[3]] : [] },
-                set: { newCards in
-                    if let card = newCards.first {
-                        if board.count == 3 {
-                            board.append(card)
-                        } else if board.count > 3 {
-                            board[3] = card
-                        }
-                    }
-                }
+                set: { if let card = $0.first {
+                    if board.count == 3 { board.append(card) }
+                    else if board.count > 3 { board[3] = card }
+                }}
             )
         case .river:
             return Binding(
                 get: { board.count > 4 ? [board[4]] : [] },
-                set: { newCards in
-                    if let card = newCards.first {
-                        if board.count == 4 {
-                            board.append(card)
-                        } else if board.count > 4 {
-                            board[4] = card
-                        }
-                    }
-                }
+                set: { if let card = $0.first {
+                    if board.count == 4 { board.append(card) }
+                    else if board.count > 4 { board[4] = card }
+                }}
             )
         }
     }
@@ -697,14 +728,13 @@ struct AddHandView: View {
     private func setupInitialState() {
         selectedSession = dataStore.sessions.first
         stakes = dataStore.sessions.first?.stakes ?? ""
-
         players = PlayerPosition.allPositions.map { position in
             PlayerState(position: position, isActive: true, isHero: position.id == heroPositionIndex)
         }
     }
 
     private func startRecording() {
-        // Update hero position in players
+        // Update hero
         for i in players.indices {
             players[i].isHero = players[i].position.id == heroPositionIndex
             if players[i].isHero {
@@ -712,31 +742,64 @@ struct AddHandView: View {
             }
         }
 
-        // Set initial blinds
-        pot = 3 // Assuming 1/2 blinds, adjust as needed
-        currentBet = 2 // Big blind
-
-        // Start with UTG (first in preflop order)
+        // Initial blinds (assuming 1/2)
+        pot = 3
+        currentBet = 2
         currentPlayerIndex = 0
-        phase = .preflop
+        actedThisRound = []
+        lastRaiserIndex = -1
+        phase = .action
+    }
+
+    private func getCurrentPlayerPositionId() -> Int? {
+        getCurrentPlayer()?.position.id
     }
 
     private func getCurrentPlayer() -> PlayerState? {
         let order = currentStreet == .preflop ? preflopOrder : postflopOrder
-        var checkedCount = 0
 
-        while checkedCount < order.count {
+        // Find next active player who hasn't completed their action this round
+        for _ in 0..<order.count {
             let positionId = order[currentPlayerIndex % order.count]
-            if let playerIndex = players.firstIndex(where: { $0.position.id == positionId }) {
-                if players[playerIndex].isActive && !players[playerIndex].isFolded {
-                    return players[playerIndex]
+
+            if let playerIdx = players.firstIndex(where: { $0.position.id == positionId }) {
+                let player = players[playerIdx]
+
+                // Skip folded players
+                if player.isFolded {
+                    currentPlayerIndex = (currentPlayerIndex + 1) % order.count
+                    continue
+                }
+
+                // Check if player needs to act
+                // They need to act if:
+                // 1. They haven't acted this round, OR
+                // 2. Someone raised after they acted
+                if !actedThisRound.contains(positionId) {
+                    return player
+                }
+
+                // If they already acted but someone raised after, they need to act again
+                if lastRaiserIndex >= 0 && actedThisRound.contains(positionId) {
+                    // Check if this player acted before the last raiser
+                    let playerActedAt = actions.lastIndex(where: { $0.position == player.position.shortName && $0.street == currentStreet })
+                    let raiserActedAt = actions.lastIndex(where: {
+                        ($0.action == .raise || $0.action == .bet || $0.action == .allIn) &&
+                        $0.street == currentStreet
+                    })
+
+                    if let pAt = playerActedAt, let rAt = raiserActedAt, pAt < rAt {
+                        // Player acted before the raise, they need to act again
+                        actedThisRound.remove(positionId)
+                        return player
+                    }
                 }
             }
-            currentPlayerIndex += 1
-            checkedCount += 1
+
+            currentPlayerIndex = (currentPlayerIndex + 1) % order.count
         }
 
-        return nil
+        return nil // Round is complete
     }
 
     private func recordAction(player: PlayerState, action: ActionType, amount: Double?) {
@@ -757,68 +820,86 @@ struct AddHandView: View {
                 players[index].isFolded = true
             }
 
-            if let amount = amount {
-                pot += amount
+            if let amt = amount {
+                pot += amt
                 if action == .bet || action == .raise || action == .allIn {
-                    currentBet = amount
+                    currentBet = amt
+                    lastRaiserIndex = currentPlayerIndex
+                    // Reset acted set so other players can respond
+                    actedThisRound = [player.position.id]
+                } else {
+                    actedThisRound.insert(player.position.id)
                 }
+            } else {
+                actedThisRound.insert(player.position.id)
             }
         }
 
         // Move to next player
-        moveToNextPlayer()
+        let order = currentStreet == .preflop ? preflopOrder : postflopOrder
+        currentPlayerIndex = (currentPlayerIndex + 1) % order.count
     }
 
-    private func moveToNextPlayer() {
-        let order = currentStreet == .preflop ? preflopOrder : postflopOrder
-        var attempts = 0
+    private func confirmBetAction() {
+        guard let amount = Double(betAmount), let player = getCurrentPlayer() else { return }
+        recordAction(player: player, action: pendingAction, amount: amount)
+    }
 
-        repeat {
-            currentPlayerIndex = (currentPlayerIndex + 1) % order.count
-            attempts += 1
-
-            let positionId = order[currentPlayerIndex]
-            if let playerIndex = players.firstIndex(where: { $0.position.id == positionId }) {
-                if players[playerIndex].isActive && !players[playerIndex].isFolded {
-                    return
-                }
-            }
-        } while attempts < order.count
-
-        // All players have acted or folded
-        roundComplete = true
+    private func confirmAllInAction() {
+        guard let amount = Double(betAmount), let player = getCurrentPlayer() else { return }
+        recordAction(player: player, action: .allIn, amount: amount)
     }
 
     private func advanceToNextStreet() {
-        currentBet = 0
-        currentPlayerIndex = 0
-        roundComplete = false
-
         switch currentStreet {
         case .preflop:
+            phase = .selectingFlop
             cardPickerType = .flop
-            showingCardPicker = true
-            currentStreet = .flop
         case .flop:
+            phase = .selectingTurn
             cardPickerType = .turn
-            showingCardPicker = true
-            currentStreet = .turn
         case .turn:
+            phase = .selectingRiver
             cardPickerType = .river
-            showingCardPicker = true
-            currentStreet = .river
         case .river:
             phase = .result
         }
     }
 
+    private func continueAfterCardSelection() {
+        // Reset for new street
+        currentBet = 0
+        currentPlayerIndex = 0
+        actedThisRound = []
+        lastRaiserIndex = -1
+
+        // Clear last actions
+        for i in players.indices {
+            if !players[i].isFolded {
+                players[i].lastAction = nil
+            }
+        }
+
+        // Advance street
+        switch phase {
+        case .selectingFlop:
+            currentStreet = .flop
+        case .selectingTurn:
+            currentStreet = .turn
+        case .selectingRiver:
+            currentStreet = .river
+        default:
+            break
+        }
+
+        phase = .action
+    }
+
     private func undoLastAction() {
         guard let lastAction = actions.last, lastAction.street == currentStreet else { return }
 
-        // Remove the action
         actions.removeLast()
 
-        // Restore player state
         if let index = players.firstIndex(where: { $0.position.shortName == lastAction.position }) {
             players[index].isFolded = false
             players[index].lastAction = nil
@@ -826,9 +907,19 @@ struct AddHandView: View {
             if let amount = lastAction.amount {
                 pot -= amount
             }
+
+            actedThisRound.remove(players[index].position.id)
         }
 
-        // Go back to previous player
+        // Recalculate current bet
+        let streetActions = actions.filter { $0.street == currentStreet }
+        if let lastBet = streetActions.last(where: { $0.action == .bet || $0.action == .raise || $0.action == .allIn }) {
+            currentBet = lastBet.amount ?? 0
+        } else {
+            currentBet = currentStreet == .preflop ? 2 : 0
+        }
+
+        // Move back
         let order = currentStreet == .preflop ? preflopOrder : postflopOrder
         currentPlayerIndex = (currentPlayerIndex - 1 + order.count) % order.count
     }
@@ -885,7 +976,6 @@ struct CardPickerView: View {
                 .frame(maxWidth: .infinity)
                 .background(Color.black.opacity(0.03))
 
-                // Card grid
                 ScrollView {
                     VStack(spacing: 20) {
                         ForEach(Suit.allCases, id: \.self) { suit in
