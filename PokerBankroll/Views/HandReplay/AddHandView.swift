@@ -14,7 +14,9 @@ struct AddHandView: View {
     @State private var notes = ""
     @State private var actions: [HandAction] = []
     @State private var currentStreet: Street = .preflop
-    @State private var players: [PlayerState] = []
+    @State private var players: [PlayerState] = PlayerPosition.allPositions.map { position in
+        PlayerState(position: position, isActive: true, isHero: position.id == 0)
+    }
 
     @State private var showingCardPicker = false
     @State private var cardPickerTarget: CardPickerTarget = .holeCards
@@ -95,7 +97,6 @@ struct AddHandView: View {
                 }
             }
             .onAppear {
-                setupPlayers()
                 if selectedSession == nil {
                     selectedSession = dataStore.sessions.first
                     stakes = dataStore.sessions.first?.stakes ?? ""

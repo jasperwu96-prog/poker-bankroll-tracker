@@ -72,7 +72,7 @@ struct PokerTableView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let size = min(geometry.size.width, geometry.size.height)
+            let size = max(1, min(geometry.size.width, geometry.size.height))
             let centerX = geometry.size.width / 2
             let centerY = geometry.size.height / 2
             let tableWidth = size * 0.85
