@@ -21,6 +21,7 @@
 		A1000012 /* HandDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012; };
 		A1000013 /* CardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000013; };
 		A1000014 /* ReplayAnimationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014; };
+		A1000015 /* PokerTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000015; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +39,7 @@
 		A2000012 /* HandDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandDetailView.swift; sourceTree = "<group>"; };
 		A2000013 /* CardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardView.swift; sourceTree = "<group>"; };
 		A2000014 /* ReplayAnimationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayAnimationView.swift; sourceTree = "<group>"; };
+		A2000015 /* PokerTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PokerTableView.swift; sourceTree = "<group>"; };
 		A3000001 /* PokerBankroll.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PokerBankroll.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -141,6 +143,7 @@
 				A2000012 /* HandDetailView.swift */,
 				A2000013 /* CardView.swift */,
 				A2000014 /* ReplayAnimationView.swift */,
+				A2000015 /* PokerTableView.swift */,
 			);
 			path = HandReplay;
 			sourceTree = "<group>";
@@ -227,6 +230,7 @@
 				A1000012 /* HandDetailView.swift in Sources */,
 				A1000013 /* CardView.swift in Sources */,
 				A1000014 /* ReplayAnimationView.swift in Sources */,
+				A1000015 /* PokerTableView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

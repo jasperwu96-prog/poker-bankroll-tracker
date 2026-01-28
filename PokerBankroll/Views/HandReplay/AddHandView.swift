@@ -6,47 +6,57 @@ struct AddHandView: View {
 
     @State private var selectedSession: Session?
     @State private var stakes = ""
-    @State private var heroPosition = "BTN"
+    @State private var heroPositionIndex = 0
     @State private var holeCards: [Card] = []
     @State private var board: [Card] = []
     @State private var potSize = ""
     @State private var result = ""
     @State private var notes = ""
     @State private var actions: [HandAction] = []
+    @State private var currentStreet: Street = .preflop
+    @State private var players: [PlayerState] = []
 
     @State private var showingCardPicker = false
     @State private var cardPickerTarget: CardPickerTarget = .holeCards
-    @State private var showingActionSheet = false
-    @State private var currentStreet: Street = .preflop
+    @State private var showingActionPicker = false
+    @State private var selectedPlayerForAction: PlayerState?
 
     enum CardPickerTarget {
         case holeCards, board
     }
 
-    let positions = ["UTG", "UTG+1", "MP", "MP+1", "HJ", "CO", "BTN", "SB", "BB"]
-
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    sessionPicker
-                    Divider()
-                    positionAndStakes
-                    Divider()
+                VStack(spacing: 20) {
+                    // Session & Stakes
+                    sessionSection
+
+                    // Poker Table for position selection
+                    tableSection
+
+                    // Hero's Hole Cards
                     holeCardsSection
-                    Divider()
+
+                    // Board Cards
                     boardSection
-                    Divider()
-                    actionsSection
-                    Divider()
+
+                    // Street Selector
+                    streetSection
+
+                    // Action Timeline
+                    actionTimeline
+
+                    // Result
                     resultSection
-                    Divider()
+
+                    // Notes
                     notesSection
                 }
                 .padding()
             }
             .background(Color.white)
-            .navigationTitle("New Hand")
+            .navigationTitle("Record Hand")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -72,90 +82,59 @@ struct AddHandView: View {
                     excludedCards: cardPickerTarget == .holeCards ? board : holeCards
                 )
             }
-            .sheet(isPresented: $showingActionSheet) {
-                AddActionSheet(
-                    actions: $actions,
-                    currentStreet: $currentStreet
-                )
-            }
-        }
-    }
-
-    // MARK: - Session Picker
-
-    private var sessionPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("SESSION")
-                .font(.caption)
-                .fontWeight(.medium)
-                .tracking(1)
-                .foregroundColor(.gray)
-
-            Menu {
-                ForEach(dataStore.sessions) { session in
-                    Button {
-                        selectedSession = session
-                        if stakes.isEmpty {
-                            stakes = session.stakes
+            .sheet(isPresented: $showingActionPicker) {
+                if let player = selectedPlayerForAction {
+                    QuickActionSheet(
+                        player: player,
+                        street: currentStreet,
+                        onAction: { action in
+                            actions.append(action)
+                            updatePlayerState(for: action)
                         }
-                    } label: {
-                        Text("\(session.date.formatted(date: .abbreviated, time: .omitted)) - \(session.stakes.isEmpty ? session.gameType.rawValue : session.stakes)")
-                    }
+                    )
                 }
-            } label: {
-                HStack {
-                    if let session = selectedSession {
-                        Text("\(session.date.formatted(date: .abbreviated, time: .omitted)) - \(session.stakes.isEmpty ? session.gameType.rawValue : session.stakes)")
-                            .foregroundColor(.black)
-                    } else {
-                        Text("Select session")
-                            .foregroundColor(.gray)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .foregroundColor(.gray)
-                }
-                .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.black.opacity(0.03))
-                )
             }
-        }
-        .onAppear {
-            if selectedSession == nil {
-                selectedSession = dataStore.sessions.first
-                stakes = dataStore.sessions.first?.stakes ?? ""
+            .onAppear {
+                setupPlayers()
+                if selectedSession == nil {
+                    selectedSession = dataStore.sessions.first
+                    stakes = dataStore.sessions.first?.stakes ?? ""
+                }
             }
         }
     }
 
-    // MARK: - Position & Stakes
+    // MARK: - Session Section
 
-    private var positionAndStakes: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("POSITION")
-                    .font(.caption)
+    private var sessionSection: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("SESSION")
+                    .font(.caption2)
                     .fontWeight(.medium)
                     .tracking(1)
                     .foregroundColor(.gray)
 
                 Menu {
-                    ForEach(positions, id: \.self) { pos in
-                        Button(pos) {
-                            heroPosition = pos
+                    ForEach(dataStore.sessions) { session in
+                        Button {
+                            selectedSession = session
+                            if stakes.isEmpty { stakes = session.stakes }
+                        } label: {
+                            Text("\(session.date.formatted(date: .abbreviated, time: .omitted))")
                         }
                     }
                 } label: {
                     HStack {
-                        Text(heroPosition)
+                        Text(selectedSession?.date.formatted(date: .abbreviated, time: .omitted) ?? "Select")
+                            .font(.subheadline)
                             .foregroundColor(.black)
-                        Spacer()
                         Image(systemName: "chevron.down")
+                            .font(.caption)
                             .foregroundColor(.gray)
                     }
-                    .padding()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Color.black.opacity(0.03))
@@ -163,21 +142,71 @@ struct AddHandView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("STAKES")
-                    .font(.caption)
+                    .font(.caption2)
                     .fontWeight(.medium)
                     .tracking(1)
                     .foregroundColor(.gray)
 
                 TextField("1/2", text: $stakes)
-                    .foregroundColor(.black)
-                    .padding()
+                    .font(.subheadline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
                             .fill(Color.black.opacity(0.03))
                     )
             }
+        }
+    }
+
+    // MARK: - Table Section
+
+    private var tableSection: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("TAP YOUR POSITION")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .tracking(1)
+                    .foregroundColor(.gray)
+
+                Spacer()
+
+                if heroPositionIndex >= 0 {
+                    Text("Hero: \(PlayerPosition.allPositions[heroPositionIndex].shortName)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.black)
+                }
+            }
+
+            // Mini poker table for position selection
+            PokerTableView(
+                players: players,
+                communityCards: board,
+                pot: calculatePot(),
+                activePlayerIndex: nil,
+                onPlayerTap: { player in
+                    if player.isHero {
+                        // Tapping hero shows action picker
+                        selectedPlayerForAction = player
+                        showingActionPicker = true
+                    } else if !player.isFolded {
+                        // Tapping opponent - either set as hero or record action
+                        if holeCards.isEmpty {
+                            // Set as hero position
+                            setHeroPosition(player.position)
+                        } else {
+                            // Record action for this player
+                            selectedPlayerForAction = player
+                            showingActionPicker = true
+                        }
+                    }
+                }
+            )
+            .frame(height: 220)
         }
     }
 
@@ -185,75 +214,9 @@ struct AddHandView: View {
 
     private var holeCardsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("HOLE CARDS")
-                .font(.caption)
-                .fontWeight(.medium)
-                .tracking(1)
-                .foregroundColor(.gray)
-
-            HStack(spacing: 8) {
-                ForEach(0..<2, id: \.self) { index in
-                    if index < holeCards.count {
-                        CardView(card: holeCards[index])
-                    } else {
-                        EmptyCardSlot()
-                    }
-                }
-
-                Spacer()
-
-                Button {
-                    cardPickerTarget = .holeCards
-                    showingCardPicker = true
-                } label: {
-                    Image(systemName: "plus.circle")
-                        .font(.title2)
-                        .foregroundColor(.black)
-                }
-            }
-        }
-    }
-
-    // MARK: - Board Section
-
-    private var boardSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("BOARD")
-                .font(.caption)
-                .fontWeight(.medium)
-                .tracking(1)
-                .foregroundColor(.gray)
-
-            HStack(spacing: 8) {
-                ForEach(0..<5, id: \.self) { index in
-                    if index < board.count {
-                        CardView(card: board[index])
-                    } else {
-                        EmptyCardSlot()
-                    }
-                }
-
-                Spacer()
-
-                Button {
-                    cardPickerTarget = .board
-                    showingCardPicker = true
-                } label: {
-                    Image(systemName: "plus.circle")
-                        .font(.title2)
-                        .foregroundColor(.black)
-                }
-            }
-        }
-    }
-
-    // MARK: - Actions Section
-
-    private var actionsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("ACTIONS")
-                    .font(.caption)
+                Text("HOLE CARDS")
+                    .font(.caption2)
                     .fontWeight(.medium)
                     .tracking(1)
                     .foregroundColor(.gray)
@@ -261,31 +224,193 @@ struct AddHandView: View {
                 Spacer()
 
                 Button {
-                    showingActionSheet = true
+                    cardPickerTarget = .holeCards
+                    showingCardPicker = true
                 } label: {
-                    Image(systemName: "plus.circle")
-                        .foregroundColor(.black)
+                    HStack(spacing: 4) {
+                        Image(systemName: holeCards.isEmpty ? "plus" : "pencil")
+                        Text(holeCards.isEmpty ? "Add" : "Edit")
+                    }
+                    .font(.caption)
+                    .foregroundColor(.black)
+                }
+            }
+
+            HStack(spacing: 8) {
+                ForEach(0..<2, id: \.self) { index in
+                    if index < holeCards.count {
+                        CardView(card: holeCards[index], size: .medium)
+                    } else {
+                        EmptyCardSlot()
+                    }
+                }
+                Spacer()
+            }
+        }
+        .onChange(of: holeCards) { _, newCards in
+            updateHeroCards(newCards)
+        }
+    }
+
+    // MARK: - Board Section
+
+    private var boardSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("BOARD")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .tracking(1)
+                    .foregroundColor(.gray)
+
+                Spacer()
+
+                Button {
+                    cardPickerTarget = .board
+                    showingCardPicker = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: board.isEmpty ? "plus" : "pencil")
+                        Text(board.isEmpty ? "Add" : "Edit")
+                    }
+                    .font(.caption)
+                    .foregroundColor(.black)
+                }
+            }
+
+            HStack(spacing: 6) {
+                ForEach(0..<5, id: \.self) { index in
+                    if index < board.count {
+                        CardView(card: board[index], size: .small)
+                    } else {
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(style: StrokeStyle(lineWidth: 1, dash: [3]))
+                            .foregroundColor(.gray.opacity(0.3))
+                            .frame(width: 32, height: 44)
+                    }
+                }
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - Street Section
+
+    private var streetSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("CURRENT STREET")
+                .font(.caption2)
+                .fontWeight(.medium)
+                .tracking(1)
+                .foregroundColor(.gray)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Street.allCases, id: \.self) { street in
+                        Button {
+                            currentStreet = street
+                        } label: {
+                            Text(street.rawValue)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(currentStreet == street ? Color.black : Color.clear)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.black, lineWidth: 1)
+                                )
+                                .foregroundColor(currentStreet == street ? .white : .black)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Action Timeline
+
+    private var actionTimeline: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("ACTIONS")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .tracking(1)
+                    .foregroundColor(.gray)
+
+                Spacer()
+
+                if !actions.isEmpty {
+                    Button {
+                        if let last = actions.last {
+                            undoAction(last)
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.uturn.backward")
+                            Text("Undo")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    }
                 }
             }
 
             if actions.isEmpty {
-                Text("No actions recorded")
+                Text("Tap a player on the table to record actions")
                     .font(.caption)
                     .foregroundColor(.gray)
                     .padding(.vertical, 8)
             } else {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     ForEach(Street.allCases, id: \.self) { street in
                         let streetActions = actions.filter { $0.street == street }
                         if !streetActions.isEmpty {
                             Text(street.rawValue)
                                 .font(.caption2)
-                                .fontWeight(.semibold)
+                                .fontWeight(.bold)
                                 .foregroundColor(.gray)
-                                .padding(.top, 4)
+                                .padding(.top, 6)
 
                             ForEach(streetActions) { action in
-                                actionRow(action)
+                                HStack(spacing: 6) {
+                                    Text(action.position)
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(action.isHero ? .white : .black)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .fill(action.isHero ? Color.black : Color.black.opacity(0.1))
+                                        )
+
+                                    Text(action.action.rawValue)
+                                        .font(.caption)
+                                        .foregroundColor(.black)
+
+                                    if let amount = action.amount, amount > 0 {
+                                        Text("$\(Int(amount))")
+                                            .font(.caption)
+                                            .fontWeight(.medium)
+                                            .foregroundColor(.gray)
+                                    }
+
+                                    Spacer()
+
+                                    Button {
+                                        undoAction(action)
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.caption2)
+                                            .foregroundColor(.gray)
+                                    }
+                                }
+                                .padding(.vertical, 2)
                             }
                         }
                     }
@@ -294,76 +419,48 @@ struct AddHandView: View {
         }
     }
 
-    private func actionRow(_ action: HandAction) -> some View {
-        HStack {
-            Text(action.position)
-                .font(.caption)
-                .fontWeight(.medium)
-                .foregroundColor(action.isHero ? .black : .gray)
-
-            Text(action.action.rawValue)
-                .font(.caption)
-                .foregroundColor(.black)
-
-            if let amount = action.amount {
-                Text("$\(Int(amount))")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-            }
-
-            Spacer()
-
-            Button {
-                actions.removeAll { $0.id == action.id }
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.gray.opacity(0.5))
-                    .font(.caption)
-            }
-        }
-        .padding(.vertical, 2)
-    }
-
     // MARK: - Result Section
 
     private var resultSection: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("POT SIZE")
-                    .font(.caption)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("FINAL POT")
+                    .font(.caption2)
                     .fontWeight(.medium)
                     .tracking(1)
                     .foregroundColor(.gray)
 
-                HStack {
+                HStack(spacing: 4) {
                     Text("$")
                         .foregroundColor(.gray)
                     TextField("0", text: $potSize)
                         .keyboardType(.decimalPad)
-                        .foregroundColor(.black)
                 }
-                .padding()
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color.black.opacity(0.03))
                 )
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("RESULT")
-                    .font(.caption)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("YOUR RESULT")
+                    .font(.caption2)
                     .fontWeight(.medium)
                     .tracking(1)
                     .foregroundColor(.gray)
 
-                HStack {
+                HStack(spacing: 4) {
                     Text("$")
                         .foregroundColor(.gray)
-                    TextField("0", text: $result)
+                    TextField("+/-", text: $result)
                         .keyboardType(.numbersAndPunctuation)
-                        .foregroundColor(.black)
                 }
-                .padding()
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color.black.opacity(0.03))
@@ -375,27 +472,70 @@ struct AddHandView: View {
     // MARK: - Notes Section
 
     private var notesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("NOTES")
-                .font(.caption)
+                .font(.caption2)
                 .fontWeight(.medium)
                 .tracking(1)
                 .foregroundColor(.gray)
 
-            TextEditor(text: $notes)
-                .font(.body)
-                .foregroundColor(.black)
-                .frame(minHeight: 60)
-                .padding(8)
+            TextField("Add notes...", text: $notes, axis: .vertical)
+                .font(.subheadline)
+                .lineLimit(3...6)
+                .padding(12)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color.black.opacity(0.03))
                 )
-                .scrollContentBackground(.hidden)
         }
     }
 
-    // MARK: - Validation & Save
+    // MARK: - Helper Methods
+
+    private func setupPlayers() {
+        players = PlayerPosition.allPositions.map { position in
+            PlayerState(position: position, isActive: true, isHero: position.id == heroPositionIndex)
+        }
+    }
+
+    private func setHeroPosition(_ position: PlayerPosition) {
+        heroPositionIndex = position.id
+        for i in players.indices {
+            players[i].isHero = players[i].position.id == position.id
+        }
+    }
+
+    private func updateHeroCards(_ cards: [Card]) {
+        if let index = players.firstIndex(where: { $0.isHero }) {
+            players[index].cards = cards
+        }
+    }
+
+    private func updatePlayerState(for action: HandAction) {
+        if let index = players.firstIndex(where: { $0.position.shortName == action.position }) {
+            players[index].lastAction = action.action
+            if action.action == .fold {
+                players[index].isFolded = true
+            }
+            if let amount = action.amount {
+                players[index].currentBet = amount
+            }
+        }
+    }
+
+    private func undoAction(_ action: HandAction) {
+        actions.removeAll { $0.id == action.id }
+        // Reset player state if needed
+        if action.action == .fold {
+            if let index = players.firstIndex(where: { $0.position.shortName == action.position }) {
+                players[index].isFolded = false
+            }
+        }
+    }
+
+    private func calculatePot() -> Double {
+        actions.compactMap { $0.amount }.reduce(0, +)
+    }
 
     private var isValid: Bool {
         selectedSession != nil && holeCards.count == 2
@@ -404,6 +544,7 @@ struct AddHandView: View {
     private func saveHand() {
         guard let session = selectedSession else { return }
 
+        let heroPosition = PlayerPosition.allPositions[heroPositionIndex].shortName
         let hand = PokerHand(
             date: Date(),
             stakes: stakes,
@@ -411,12 +552,143 @@ struct AddHandView: View {
             holeCards: holeCards,
             board: board,
             actions: actions,
-            potSize: Double(potSize) ?? 0,
+            potSize: Double(potSize) ?? calculatePot(),
             result: Double(result) ?? 0,
             notes: notes
         )
 
         dataStore.addHand(hand, to: session.id)
+        dismiss()
+    }
+}
+
+// MARK: - Quick Action Sheet
+
+struct QuickActionSheet: View {
+    let player: PlayerState
+    let street: Street
+    let onAction: (HandAction) -> Void
+
+    @Environment(\.dismiss) var dismiss
+    @State private var selectedAction: ActionType = .call
+    @State private var amount = ""
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                // Player Info
+                HStack {
+                    Text(player.position.shortName)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(player.isHero ? .white : .black)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(player.isHero ? Color.black : Color.black.opacity(0.1))
+                        )
+
+                    Spacer()
+
+                    Text(street.rawValue)
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                }
+
+                // Action Buttons - 2x3 Grid
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    ForEach(ActionType.allCases, id: \.self) { action in
+                        Button {
+                            selectedAction = action
+                            if action == .fold || action == .check {
+                                submitAction()
+                            }
+                        } label: {
+                            Text(action.rawValue)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(selectedAction == action ? Color.black : Color.white)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color.black, lineWidth: 1.5)
+                                )
+                                .foregroundColor(selectedAction == action ? .white : .black)
+                        }
+                    }
+                }
+
+                // Amount Input (for bet/raise/call/all-in)
+                if selectedAction != .fold && selectedAction != .check {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("AMOUNT")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .tracking(1)
+                            .foregroundColor(.gray)
+
+                        HStack {
+                            Text("$")
+                                .font(.title2)
+                                .foregroundColor(.gray)
+                            TextField("0", text: $amount)
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .keyboardType(.decimalPad)
+                        }
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.black.opacity(0.03))
+                        )
+                    }
+
+                    Button {
+                        submitAction()
+                    } label: {
+                        Text("Add Action")
+                            .font(.headline)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.black)
+                            .cornerRadius(12)
+                    }
+                    .disabled(amount.isEmpty && selectedAction != .fold && selectedAction != .check)
+                }
+
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Record Action")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .foregroundColor(.black)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func submitAction() {
+        let action = HandAction(
+            street: street,
+            position: player.position.shortName,
+            action: selectedAction,
+            amount: Double(amount),
+            isHero: player.isHero
+        )
+        onAction(action)
         dismiss()
     }
 }
@@ -442,60 +714,71 @@ struct CardPickerView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    // Selected Cards
-                    HStack(spacing: 8) {
-                        ForEach(selectedCards) { card in
-                            CardView(card: card)
+            VStack(spacing: 0) {
+                // Selected Cards Display
+                HStack(spacing: 8) {
+                    ForEach(0..<maxCards, id: \.self) { index in
+                        if index < selectedCards.count {
+                            CardView(card: selectedCards[index], size: .medium)
                                 .onTapGesture {
-                                    selectedCards.removeAll { $0.id == card.id }
+                                    selectedCards.remove(at: index)
                                 }
-                        }
-                    }
-                    .frame(height: 60)
-                    .padding(.vertical)
-
-                    // Card Grid
-                    ForEach(Suit.allCases, id: \.self) { suit in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(suit.symbol)
-                                .font(.headline)
-                                .foregroundColor(.black)
-
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
-                                ForEach(Rank.allCases, id: \.self) { rank in
-                                    let card = Card(rank: rank, suit: suit)
-                                    let isSelected = selectedCards.contains(card)
-                                    let isExcluded = excludedCards.contains(card)
-
-                                    Button {
-                                        if isSelected {
-                                            selectedCards.removeAll { $0.id == card.id }
-                                        } else if selectedCards.count < maxCards && !isExcluded {
-                                            selectedCards.append(card)
-                                        }
-                                    } label: {
-                                        Text(rank.display)
-                                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                                            .frame(width: 36, height: 44)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 6)
-                                                    .fill(isSelected ? Color.black : Color.white)
-                                            )
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 6)
-                                                    .stroke(isExcluded ? Color.gray.opacity(0.2) : Color.black.opacity(0.3), lineWidth: 1)
-                                            )
-                                            .foregroundColor(isSelected ? .white : (isExcluded ? .gray.opacity(0.3) : .black))
-                                    }
-                                    .disabled(isExcluded)
-                                }
-                            }
+                        } else {
+                            EmptyCardSlot()
                         }
                     }
                 }
                 .padding()
+                .background(Color.black.opacity(0.03))
+
+                // Card Grid
+                ScrollView {
+                    VStack(spacing: 16) {
+                        ForEach(Suit.allCases, id: \.self) { suit in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(suit.symbol)
+                                    .font(.title2)
+                                    .foregroundColor(.black)
+
+                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
+                                    ForEach(Rank.allCases, id: \.self) { rank in
+                                        let card = Card(rank: rank, suit: suit)
+                                        let isSelected = selectedCards.contains(card)
+                                        let isExcluded = excludedCards.contains(card)
+
+                                        Button {
+                                            if isSelected {
+                                                selectedCards.removeAll { $0.id == card.id }
+                                            } else if selectedCards.count < maxCards && !isExcluded {
+                                                selectedCards.append(card)
+                                            }
+                                        } label: {
+                                            Text(rank.display)
+                                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                                                .frame(width: 38, height: 48)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 6)
+                                                        .fill(isSelected ? Color.black : Color.white)
+                                                )
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 6)
+                                                        .stroke(
+                                                            isExcluded ? Color.gray.opacity(0.2) : Color.black.opacity(0.3),
+                                                            lineWidth: 1
+                                                        )
+                                                )
+                                                .foregroundColor(
+                                                    isSelected ? .white : (isExcluded ? .gray.opacity(0.3) : .black)
+                                                )
+                                        }
+                                        .disabled(isExcluded)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding()
+                }
             }
             .background(Color.white)
             .navigationTitle("Select Cards")
@@ -510,198 +793,6 @@ struct CardPickerView: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - Add Action Sheet
-
-struct AddActionSheet: View {
-    @Environment(\.dismiss) var dismiss
-    @Binding var actions: [HandAction]
-    @Binding var currentStreet: Street
-
-    @State private var position = "BTN"
-    @State private var actionType: ActionType = .call
-    @State private var amount = ""
-    @State private var isHero = true
-
-    let positions = ["UTG", "UTG+1", "MP", "MP+1", "HJ", "CO", "BTN", "SB", "BB"]
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
-                // Street Picker
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("STREET")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .tracking(1)
-                        .foregroundColor(.gray)
-
-                    HStack(spacing: 8) {
-                        ForEach(Street.allCases, id: \.self) { street in
-                            Button {
-                                currentStreet = street
-                            } label: {
-                                Text(street.rawValue)
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(currentStreet == street ? Color.black : Color.clear)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color.black, lineWidth: 1)
-                                    )
-                                    .foregroundColor(currentStreet == street ? .white : .black)
-                            }
-                        }
-                    }
-                }
-
-                // Position & Hero Toggle
-                HStack(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("POSITION")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .tracking(1)
-                            .foregroundColor(.gray)
-
-                        Menu {
-                            ForEach(positions, id: \.self) { pos in
-                                Button(pos) {
-                                    position = pos
-                                }
-                            }
-                        } label: {
-                            HStack {
-                                Text(position)
-                                    .foregroundColor(.black)
-                                Image(systemName: "chevron.down")
-                                    .foregroundColor(.gray)
-                            }
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.black.opacity(0.03))
-                            )
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("HERO")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .tracking(1)
-                            .foregroundColor(.gray)
-
-                        Toggle("", isOn: $isHero)
-                            .labelsHidden()
-                            .tint(.black)
-                    }
-                }
-
-                // Action Type
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("ACTION")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .tracking(1)
-                        .foregroundColor(.gray)
-
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        ForEach(ActionType.allCases, id: \.self) { action in
-                            Button {
-                                actionType = action
-                            } label: {
-                                Text(action.rawValue)
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(actionType == action ? Color.black : Color.clear)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color.black, lineWidth: 1)
-                                    )
-                                    .foregroundColor(actionType == action ? .white : .black)
-                            }
-                        }
-                    }
-                }
-
-                // Amount
-                if actionType != .fold && actionType != .check {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("AMOUNT")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .tracking(1)
-                            .foregroundColor(.gray)
-
-                        HStack {
-                            Text("$")
-                                .foregroundColor(.gray)
-                            TextField("0", text: $amount)
-                                .keyboardType(.decimalPad)
-                                .foregroundColor(.black)
-                        }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.black.opacity(0.03))
-                        )
-                    }
-                }
-
-                Spacer()
-
-                Button {
-                    addAction()
-                } label: {
-                    Text("Add Action")
-                        .font(.headline)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.black)
-                        .cornerRadius(12)
-                }
-            }
-            .padding()
-            .background(Color.white)
-            .navigationTitle("Add Action")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .foregroundColor(.black)
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
-    private func addAction() {
-        let action = HandAction(
-            street: currentStreet,
-            position: position,
-            action: actionType,
-            amount: Double(amount),
-            isHero: isHero
-        )
-        actions.append(action)
-        amount = ""
     }
 }
 
