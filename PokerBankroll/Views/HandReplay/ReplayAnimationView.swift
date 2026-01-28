@@ -94,11 +94,13 @@ struct ReplayAnimationView: View {
 
     private var tableArea: some View {
         GeometryReader { geometry in
-            let size = min(geometry.size.width, geometry.size.height)
-            let centerX = geometry.size.width / 2
-            let centerY = geometry.size.height / 2
-            let tableWidth = size * 0.9
-            let tableHeight = size * 0.55
+            let width = geometry.size.width
+            let height = geometry.size.height
+            let centerX = width / 2
+            let centerY = height / 2
+            // Make table smaller to leave room for player labels
+            let tableWidth = width * 0.65
+            let tableHeight = height * 0.45
 
             ZStack {
                 // Table
@@ -121,7 +123,7 @@ struct ReplayAnimationView: View {
                                 .fill(Color.white)
                                 .shadow(color: .black.opacity(0.15), radius: 3)
                         )
-                        .position(x: centerX, y: centerY + 40)
+                        .position(x: centerX, y: centerY + 35)
                 }
 
                 // Players around the table
@@ -130,15 +132,20 @@ struct ReplayAnimationView: View {
                         for: player.position,
                         centerX: centerX,
                         centerY: centerY,
-                        radiusX: tableWidth / 2 + 40,
-                        radiusY: tableHeight / 2 + 40
+                        radiusX: tableWidth / 2 + 50,
+                        radiusY: tableHeight / 2 + 55
                     )
 
+                    // Clamp positions to stay within bounds
+                    let clampedX = max(45, min(width - 45, pos.x))
+                    let clampedY = max(40, min(height - 40, pos.y))
+
                     ReplayPlayerView(player: player, showCards: shouldShowCards(for: player))
-                        .position(x: pos.x, y: pos.y)
+                        .position(x: clampedX, y: clampedY)
                 }
             }
         }
+        .padding(.horizontal, 8)
     }
 
     // MARK: - Table Shape

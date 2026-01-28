@@ -72,11 +72,13 @@ struct PokerTableView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let size = max(1, min(geometry.size.width, geometry.size.height))
-            let centerX = geometry.size.width / 2
-            let centerY = geometry.size.height / 2
-            let tableWidth = size * 0.85
-            let tableHeight = size * 0.5
+            let width = geometry.size.width
+            let height = geometry.size.height
+            let centerX = width / 2
+            let centerY = height / 2
+            // Make table smaller to leave room for player labels
+            let tableWidth = width * 0.65
+            let tableHeight = height * 0.45
 
             ZStack {
                 // Table
@@ -90,29 +92,33 @@ struct PokerTableView: View {
                 // Pot
                 if pot > 0 {
                     potView
-                        .position(x: centerX, y: centerY + 35)
+                        .position(x: centerX, y: centerY + 30)
                 }
 
-                // Players
+                // Players - position with padding from edges
                 ForEach(players) { player in
                     let pos = playerPosition(
                         for: player.position,
                         centerX: centerX,
                         centerY: centerY,
-                        radiusX: tableWidth / 2 + 35,
-                        radiusY: tableHeight / 2 + 35
+                        radiusX: tableWidth / 2 + 45,
+                        radiusY: tableHeight / 2 + 50
                     )
+
+                    // Clamp positions to stay within bounds
+                    let clampedX = max(40, min(width - 40, pos.x))
+                    let clampedY = max(35, min(height - 35, pos.y))
 
                     PlayerSeatView(
                         player: player,
                         isActive: activePlayerIndex == player.id,
                         onTap: { onPlayerTap?(player) }
                     )
-                    .position(x: pos.x, y: pos.y)
+                    .position(x: clampedX, y: clampedY)
                 }
             }
         }
-        .aspectRatio(1.4, contentMode: .fit)
+        .aspectRatio(1.5, contentMode: .fit)
     }
 
     // MARK: - Table Shape

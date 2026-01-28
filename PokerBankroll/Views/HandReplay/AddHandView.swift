@@ -6,11 +6,13 @@ struct AddHandView: View {
 
     // Session & Basic Info
     @State private var selectedSession: Session?
-    @State private var stakes = ""
+    @State private var selectedStakesIndex = 1 // Default to 1/3
     @State private var heroPositionIndex = 0
     @State private var holeCards: [Card] = []
-    @State private var result = ""
     @State private var notes = ""
+
+    // Stakes options
+    let stakesOptions = ["1/2", "1/3", "2/5", "5/10", "10/20", "25/50"]
 
     // Game State
     @State private var currentStreet: Street = .preflop
@@ -20,6 +22,19 @@ struct AddHandView: View {
     @State private var pot: Double = 0
     @State private var currentBet: Double = 0
     @State private var actedThisRound: Set<Int> = []
+    @State private var playerContributions: [Int: Double] = [:] // Track each player's total contributions
+    @State private var winnerPositionId: Int? = nil // Who won the hand
+
+    // Computed blinds from stakes
+    private var smallBlind: Double {
+        let parts = stakesOptions[selectedStakesIndex].split(separator: "/")
+        return Double(parts.first ?? "1") ?? 1
+    }
+
+    private var bigBlind: Double {
+        let parts = stakesOptions[selectedStakesIndex].split(separator: "/")
+        return Double(parts.last ?? "2") ?? 2
+    }
 
     // UI State
     @State private var phase: RecordingPhase = .setup
@@ -82,7 +97,8 @@ struct AddHandView: View {
                     if phase == .result {
                         Button("Save") { saveHand() }
                             .fontWeight(.semibold)
-                            .foregroundColor(.black)
+                            .foregroundColor(winnerPositionId != nil ? .black : .gray)
+                            .disabled(winnerPositionId == nil)
                     }
                 }
             }
@@ -149,6 +165,8 @@ struct AddHandView: View {
         VStack(spacing: 24) {
             sessionPicker
             Divider()
+            stakesSelector
+            Divider()
             heroPositionSelector
             Divider()
             holeCardsSelector
@@ -179,32 +197,63 @@ struct AddHandView: View {
                 .tracking(1)
                 .foregroundColor(.gray)
 
-            HStack(spacing: 12) {
-                Menu {
-                    ForEach(dataStore.sessions) { session in
-                        Button {
-                            selectedSession = session
-                            stakes = session.stakes
-                        } label: {
-                            Text(session.date.formatted(date: .abbreviated, time: .omitted))
-                        }
+            Menu {
+                ForEach(dataStore.sessions) { session in
+                    Button {
+                        selectedSession = session
+                    } label: {
+                        Text(session.date.formatted(date: .abbreviated, time: .omitted))
                     }
-                } label: {
-                    HStack {
-                        Text(selectedSession?.date.formatted(date: .abbreviated, time: .omitted) ?? "Select")
-                            .foregroundColor(.black)
-                        Image(systemName: "chevron.down")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.03)))
                 }
-
-                TextField("Stakes", text: $stakes)
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.03)))
+            } label: {
+                HStack {
+                    Text(selectedSession?.date.formatted(date: .abbreviated, time: .omitted) ?? "Select Session")
+                        .foregroundColor(.black)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.03)))
             }
+        }
+    }
+
+    private var stakesSelector: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("STAKES")
+                .font(.caption2)
+                .fontWeight(.medium)
+                .tracking(1)
+                .foregroundColor(.gray)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                ForEach(0..<stakesOptions.count, id: \.self) { index in
+                    Button {
+                        selectedStakesIndex = index
+                    } label: {
+                        Text(stakesOptions[index])
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(selectedStakesIndex == index ? Color.black : Color.white)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.black, lineWidth: 1)
+                            )
+                            .foregroundColor(selectedStakesIndex == index ? .white : .black)
+                    }
+                }
+            }
+
+            Text("SB: $\(Int(smallBlind)) / BB: $\(Int(bigBlind))")
+                .font(.caption)
+                .foregroundColor(.gray)
         }
     }
 
@@ -328,7 +377,10 @@ struct AddHandView: View {
     }
 
     private func currentPlayerActionPanel(_ player: PlayerState) -> some View {
-        VStack(spacing: 16) {
+        let amountToCall = max(0, currentBet - player.currentBet)
+        let canCheck = amountToCall == 0
+
+        return VStack(spacing: 16) {
             // Player indicator
             HStack {
                 Text(player.position.shortName)
@@ -350,8 +402,8 @@ struct AddHandView: View {
 
                 Spacer()
 
-                if currentBet > 0 {
-                    Text("To call: $\(Int(currentBet))")
+                if amountToCall > 0 {
+                    Text("To call: $\(Int(amountToCall))")
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .foregroundColor(.gray)
@@ -365,20 +417,20 @@ struct AddHandView: View {
                         recordAction(player: player, action: .fold, amount: nil)
                     }
 
-                    if currentBet == 0 {
+                    if canCheck {
                         actionButton("Check", style: .filled) {
                             recordAction(player: player, action: .check, amount: nil)
                         }
                     } else {
-                        actionButton("Call $\(Int(currentBet))", style: .filled) {
+                        actionButton("Call $\(Int(amountToCall))", style: .filled) {
                             recordAction(player: player, action: .call, amount: currentBet)
                         }
                     }
                 }
 
                 HStack(spacing: 10) {
-                    actionButton(currentBet == 0 ? "Bet" : "Raise", style: .outline) {
-                        pendingAction = currentBet == 0 ? .bet : .raise
+                    actionButton(canCheck ? "Bet" : "Raise", style: .outline) {
+                        pendingAction = canCheck ? .bet : .raise
                         betAmount = ""
                         showingBetInput = true
                     }
@@ -531,11 +583,21 @@ struct AddHandView: View {
             Text(cardSelectionTitle)
                 .font(.headline)
 
-            // Current board
+            // Current board - tap cards to remove them
             HStack(spacing: 8) {
                 ForEach(0..<expectedBoardCards, id: \.self) { index in
                     if index < board.count {
                         CardView(card: board[index], size: .large)
+                            .onTapGesture {
+                                // Remove this card and all cards after it
+                                if phase == .selectingFlop {
+                                    board = []
+                                } else if phase == .selectingTurn && index >= 3 {
+                                    board = Array(board.prefix(3))
+                                } else if phase == .selectingRiver && index >= 4 {
+                                    board = Array(board.prefix(4))
+                                }
+                            }
                     } else {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(style: StrokeStyle(lineWidth: 2, dash: [6]))
@@ -545,10 +607,23 @@ struct AddHandView: View {
                 }
             }
 
+            // Show helpful text
+            if board.count < expectedBoardCards {
+                Text("Tap to select cards")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            } else {
+                Text("Tap a card to change selection")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+
             Button {
+                // Clear current selection for this street before opening picker
+                prepareCardPicker()
                 showingCardPicker = true
             } label: {
-                Text("Select Cards")
+                Text(board.count >= expectedBoardCards ? "Change Cards" : "Select Cards")
                     .font(.headline)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
@@ -577,6 +652,23 @@ struct AddHandView: View {
         }
     }
 
+    private func prepareCardPicker() {
+        // Clear cards for current street to allow fresh selection
+        switch phase {
+        case .selectingFlop:
+            board = []
+            cardPickerType = .flop
+        case .selectingTurn:
+            board = Array(board.prefix(3)) // Keep only flop
+            cardPickerType = .turn
+        case .selectingRiver:
+            board = Array(board.prefix(4)) // Keep flop and turn
+            cardPickerType = .river
+        default:
+            break
+        }
+    }
+
     private var cardSelectionTitle: String {
         switch phase {
         case .selectingFlop: return "Select 3 Flop Cards"
@@ -596,6 +688,25 @@ struct AddHandView: View {
     }
 
     // MARK: - Result Phase
+
+    private var activePlayers: [PlayerState] {
+        players.filter { !$0.isFolded }
+    }
+
+    private var heroContribution: Double {
+        playerContributions[heroPositionIndex] ?? 0
+    }
+
+    private var calculatedResult: Double {
+        guard let winnerId = winnerPositionId else { return 0 }
+        if winnerId == heroPositionIndex {
+            // Hero won - profit is pot minus their contribution
+            return pot - heroContribution
+        } else {
+            // Hero lost - loss is their total contribution
+            return -heroContribution
+        }
+    }
 
     private var resultPhase: some View {
         VStack(spacing: 24) {
@@ -633,29 +744,79 @@ struct AddHandView: View {
 
             Divider()
 
-            // Result input
-            VStack(alignment: .leading, spacing: 8) {
-                Text("YOUR RESULT")
+            // Winner selection
+            VStack(alignment: .leading, spacing: 12) {
+                Text("WHO WON?")
                     .font(.caption2)
                     .fontWeight(.medium)
                     .tracking(1)
                     .foregroundColor(.gray)
 
-                HStack {
-                    Text("$")
-                        .font(.title2)
-                        .foregroundColor(.gray)
-                    TextField("+/- amount", text: $result)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .keyboardType(.numbersAndPunctuation)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                    ForEach(activePlayers) { player in
+                        Button {
+                            winnerPositionId = player.position.id
+                        } label: {
+                            VStack(spacing: 4) {
+                                Text(player.position.shortName)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                if player.isHero {
+                                    Text("(You)")
+                                        .font(.caption2)
+                                        .foregroundColor(winnerPositionId == player.position.id ? .white.opacity(0.7) : .gray)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(winnerPositionId == player.position.id ? Color.black : Color.white)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.black, lineWidth: 1)
+                            )
+                            .foregroundColor(winnerPositionId == player.position.id ? .white : .black)
+                        }
+                    }
                 }
-                .padding()
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.03)))
+            }
 
-                Text("Positive = win, Negative = loss")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+            // Auto-calculated result
+            if winnerPositionId != nil {
+                VStack(spacing: 8) {
+                    Text("YOUR RESULT")
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .tracking(1)
+                        .foregroundColor(.gray)
+
+                    HStack {
+                        Text(calculatedResult >= 0 ? "+$\(Int(calculatedResult))" : "-$\(Int(abs(calculatedResult)))")
+                            .font(.title)
+                            .fontWeight(.bold)
+                            .foregroundColor(calculatedResult >= 0 ? .black : .gray)
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("You put in: $\(Int(heroContribution))")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                            if calculatedResult >= 0 {
+                                Text("Won pot: $\(Int(pot))")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(calculatedResult >= 0 ? Color.black.opacity(0.05) : Color.gray.opacity(0.1))
+                    )
+                }
             }
 
             // Notes
@@ -725,7 +886,6 @@ struct AddHandView: View {
 
     private func setupInitialState() {
         selectedSession = dataStore.sessions.first
-        stakes = dataStore.sessions.first?.stakes ?? ""
         players = PlayerPosition.allPositions.map { position in
             PlayerState(position: position, isActive: true, isHero: position.id == heroPositionIndex)
         }
@@ -740,10 +900,49 @@ struct AddHandView: View {
             }
         }
 
-        // Initial blinds (assuming 1/2)
-        pot = 3
-        currentBet = 2
-        actedThisRound = []
+        // Reset contributions tracking
+        playerContributions = [:]
+
+        // Auto-post blinds
+        let sb = smallBlind
+        let bb = bigBlind
+
+        // SB posts small blind (position id 1)
+        if let sbIndex = players.firstIndex(where: { $0.position.id == 1 }) {
+            players[sbIndex].currentBet = sb
+            players[sbIndex].lastAction = .bet
+            playerContributions[1] = sb
+
+            let sbAction = HandAction(
+                street: .preflop,
+                position: players[sbIndex].position.shortName,
+                action: .bet,
+                amount: sb,
+                isHero: players[sbIndex].isHero
+            )
+            actions.append(sbAction)
+        }
+
+        // BB posts big blind (position id 2)
+        if let bbIndex = players.firstIndex(where: { $0.position.id == 2 }) {
+            players[bbIndex].currentBet = bb
+            players[bbIndex].lastAction = .bet
+            playerContributions[2] = bb
+
+            let bbAction = HandAction(
+                street: .preflop,
+                position: players[bbIndex].position.shortName,
+                action: .bet,
+                amount: bb,
+                isHero: players[bbIndex].isHero
+            )
+            actions.append(bbAction)
+        }
+
+        // Initial pot and bet to call
+        pot = sb + bb
+        currentBet = bb
+        actedThisRound = [1, 2] // SB and BB have "acted" by posting
         phase = .action
     }
 
@@ -788,48 +987,74 @@ struct AddHandView: View {
     }
 
     private func recordAction(player: PlayerState, action: ActionType, amount: Double?) {
+        // Calculate the actual amount added to pot (for calls, it's the difference)
+        var actualAmount = amount
+        let playerId = player.position.id
+
+        if action == .call, let amt = amount {
+            // For a call, the amount added is the call amount minus what they've already put in this street
+            let alreadyIn = players.first(where: { $0.position.id == playerId })?.currentBet ?? 0
+            actualAmount = amt - alreadyIn
+        }
+
         let handAction = HandAction(
             street: currentStreet,
             position: player.position.shortName,
             action: action,
-            amount: amount,
+            amount: amount, // Store the total bet/raise amount for display
             isHero: player.isHero
         )
         actions.append(handAction)
 
         // Update player state
-        if let index = players.firstIndex(where: { $0.position.id == player.position.id }) {
+        if let index = players.firstIndex(where: { $0.position.id == playerId }) {
             players[index].lastAction = action
 
             if action == .fold {
                 players[index].isFolded = true
             }
 
-            if let amt = amount {
+            if let amt = actualAmount, amt > 0 {
                 pot += amt
+                playerContributions[playerId, default: 0] += amt
+
                 if action == .bet || action == .raise || action == .allIn {
-                    currentBet = amt
+                    // For raise/bet, update current bet to the total amount
+                    currentBet = amount ?? amt
+                    players[index].currentBet = currentBet
                     // Reset acted set so other players can respond, but keep the raiser as acted
-                    let raiserId = player.position.id
-                    actedThisRound = [raiserId]
+                    actedThisRound = [playerId]
+                } else if action == .call {
+                    // For call, player matches the current bet
+                    players[index].currentBet = currentBet
+                    actedThisRound.insert(playerId)
                 } else {
-                    actedThisRound.insert(player.position.id)
+                    actedThisRound.insert(playerId)
                 }
             } else {
                 // Fold or check
-                actedThisRound.insert(player.position.id)
+                actedThisRound.insert(playerId)
             }
         }
     }
 
     private func confirmBetAction() {
-        guard let amount = Double(betAmount), let player = getCurrentPlayer() else { return }
-        recordAction(player: player, action: pendingAction, amount: amount)
+        guard let amount = Double(betAmount), amount > 0, let player = getCurrentPlayer() else { return }
+        // For raise, the amount is the total bet TO (e.g., raise to 15 means total is 15)
+        // Calculate how much is actually being added
+        let playerCurrentBet = player.currentBet
+        let additionalAmount = amount - playerCurrentBet
+
+        if additionalAmount > 0 {
+            recordAction(player: player, action: pendingAction, amount: amount)
+        }
+        betAmount = ""
     }
 
     private func confirmAllInAction() {
-        guard let amount = Double(betAmount), let player = getCurrentPlayer() else { return }
+        guard let amount = Double(betAmount), amount > 0, let player = getCurrentPlayer() else { return }
         recordAction(player: player, action: .allIn, amount: amount)
+        betAmount = ""
     }
 
     private func advanceToNextStreet() {
@@ -853,10 +1078,11 @@ struct AddHandView: View {
         currentBet = 0
         actedThisRound = []
 
-        // Clear last actions
+        // Clear last actions and reset current bets for new street
         for i in players.indices {
             if !players[i].isFolded {
                 players[i].lastAction = nil
+                players[i].currentBet = 0 // Reset street bet
             }
         }
 
@@ -929,16 +1155,19 @@ struct AddHandView: View {
         guard let session = selectedSession else { return }
 
         let heroPosition = PlayerPosition.allPositions[heroPositionIndex].shortName
+        let winnerPosition = winnerPositionId != nil ? PlayerPosition.allPositions.first(where: { $0.id == winnerPositionId })?.shortName : nil
+
         let hand = PokerHand(
             date: Date(),
-            stakes: stakes,
+            stakes: stakesOptions[selectedStakesIndex],
             heroPosition: heroPosition,
             holeCards: holeCards,
             board: board,
             actions: actions,
             potSize: pot,
-            result: Double(result) ?? 0,
-            notes: notes
+            result: calculatedResult,
+            notes: notes,
+            winner: winnerPosition
         )
 
         dataStore.addHand(hand, to: session.id)
