@@ -17,10 +17,8 @@ struct AddHandView: View {
     @State private var board: [Card] = []
     @State private var actions: [HandAction] = []
     @State private var players: [PlayerState] = []
-    @State private var currentPlayerIndex = 0
     @State private var pot: Double = 0
     @State private var currentBet: Double = 0
-    @State private var lastRaiserIndex: Int = -1
     @State private var actedThisRound: Set<Int> = []
 
     // UI State
@@ -745,61 +743,48 @@ struct AddHandView: View {
         // Initial blinds (assuming 1/2)
         pot = 3
         currentBet = 2
-        currentPlayerIndex = 0
         actedThisRound = []
-        lastRaiserIndex = -1
         phase = .action
     }
 
     private func getCurrentPlayerPositionId() -> Int? {
-        getCurrentPlayer()?.position.id
+        findCurrentPlayer()?.position.id
     }
 
     private func getCurrentPlayer() -> PlayerState? {
+        findCurrentPlayer()
+    }
+
+    // Non-mutating function to find current player
+    private func findCurrentPlayer() -> PlayerState? {
         let order = currentStreet == .preflop ? preflopOrder : postflopOrder
 
-        // Find next active player who hasn't completed their action this round
-        for _ in 0..<order.count {
-            let positionId = order[currentPlayerIndex % order.count]
-
-            if let playerIdx = players.firstIndex(where: { $0.position.id == positionId }) {
-                let player = players[playerIdx]
-
-                // Skip folded players
-                if player.isFolded {
-                    currentPlayerIndex = (currentPlayerIndex + 1) % order.count
-                    continue
-                }
-
-                // Check if player needs to act
-                // They need to act if:
-                // 1. They haven't acted this round, OR
-                // 2. Someone raised after they acted
-                if !actedThisRound.contains(positionId) {
-                    return player
-                }
-
-                // If they already acted but someone raised after, they need to act again
-                if lastRaiserIndex >= 0 && actedThisRound.contains(positionId) {
-                    // Check if this player acted before the last raiser
-                    let playerActedAt = actions.lastIndex(where: { $0.position == player.position.shortName && $0.street == currentStreet })
-                    let raiserActedAt = actions.lastIndex(where: {
-                        ($0.action == .raise || $0.action == .bet || $0.action == .allIn) &&
-                        $0.street == currentStreet
-                    })
-
-                    if let pAt = playerActedAt, let rAt = raiserActedAt, pAt < rAt {
-                        // Player acted before the raise, they need to act again
-                        actedThisRound.remove(positionId)
-                        return player
-                    }
-                }
-            }
-
-            currentPlayerIndex = (currentPlayerIndex + 1) % order.count
+        // Count active (non-folded) players
+        let activePlayers = players.filter { !$0.isFolded }
+        if activePlayers.count <= 1 {
+            return nil // Hand is over, only one player left
         }
 
-        return nil // Round is complete
+        // Find the first player in order who needs to act
+        for i in 0..<order.count {
+            let positionId = order[i]
+
+            guard let player = players.first(where: { $0.position.id == positionId }) else {
+                continue
+            }
+
+            // Skip folded players
+            if player.isFolded {
+                continue
+            }
+
+            // Check if player needs to act (hasn't acted this round)
+            if !actedThisRound.contains(positionId) {
+                return player
+            }
+        }
+
+        return nil // Round is complete - all active players have acted
     }
 
     private func recordAction(player: PlayerState, action: ActionType, amount: Double?) {
@@ -824,20 +809,17 @@ struct AddHandView: View {
                 pot += amt
                 if action == .bet || action == .raise || action == .allIn {
                     currentBet = amt
-                    lastRaiserIndex = currentPlayerIndex
-                    // Reset acted set so other players can respond
-                    actedThisRound = [player.position.id]
+                    // Reset acted set so other players can respond, but keep the raiser as acted
+                    let raiserId = player.position.id
+                    actedThisRound = [raiserId]
                 } else {
                     actedThisRound.insert(player.position.id)
                 }
             } else {
+                // Fold or check
                 actedThisRound.insert(player.position.id)
             }
         }
-
-        // Move to next player
-        let order = currentStreet == .preflop ? preflopOrder : postflopOrder
-        currentPlayerIndex = (currentPlayerIndex + 1) % order.count
     }
 
     private func confirmBetAction() {
@@ -869,9 +851,7 @@ struct AddHandView: View {
     private func continueAfterCardSelection() {
         // Reset for new street
         currentBet = 0
-        currentPlayerIndex = 0
         actedThisRound = []
-        lastRaiserIndex = -1
 
         // Clear last actions
         for i in players.indices {
@@ -907,9 +887,10 @@ struct AddHandView: View {
             if let amount = lastAction.amount {
                 pot -= amount
             }
-
-            actedThisRound.remove(players[index].position.id)
         }
+
+        // Rebuild actedThisRound from remaining actions
+        rebuildActedThisRound()
 
         // Recalculate current bet
         let streetActions = actions.filter { $0.street == currentStreet }
@@ -918,10 +899,30 @@ struct AddHandView: View {
         } else {
             currentBet = currentStreet == .preflop ? 2 : 0
         }
+    }
 
-        // Move back
-        let order = currentStreet == .preflop ? preflopOrder : postflopOrder
-        currentPlayerIndex = (currentPlayerIndex - 1 + order.count) % order.count
+    private func rebuildActedThisRound() {
+        actedThisRound = []
+
+        let streetActions = actions.filter { $0.street == currentStreet }
+
+        // Find the last raise/bet action
+        if let lastRaiseIndex = streetActions.lastIndex(where: { $0.action == .bet || $0.action == .raise || $0.action == .allIn }) {
+            // Only count actions from the last raise onwards
+            for i in lastRaiseIndex..<streetActions.count {
+                let action = streetActions[i]
+                if let player = players.first(where: { $0.position.shortName == action.position }) {
+                    actedThisRound.insert(player.position.id)
+                }
+            }
+        } else {
+            // No raise, all actions count
+            for action in streetActions {
+                if let player = players.first(where: { $0.position.shortName == action.position }) {
+                    actedThisRound.insert(player.position.id)
+                }
+            }
+        }
     }
 
     private func saveHand() {
