@@ -26,6 +26,7 @@ struct AddHandView: View {
     @State private var winnerPositionId: Int? = nil // Who won the hand
     @State private var opponentHands: [Int: [Card]] = [:] // Store opponent hole cards for showdown
     @State private var selectedOpponentId: Int? = nil // Currently selecting cards for this opponent
+    @State private var muckedOpponents: Set<Int> = [] // Opponents who mucked their hands
 
     // Computed blinds from stakes
     private var smallBlind: Double {
@@ -706,7 +707,7 @@ struct AddHandView: View {
     private var allShowdownHandsEntered: Bool {
         guard isShowdown else { return true }
         return opponentsAtShowdown.allSatisfy { opponent in
-            opponentHands[opponent.position.id]?.count == 2
+            opponentHands[opponent.position.id]?.count == 2 || muckedOpponents.contains(opponent.position.id)
         }
     }
 
@@ -740,8 +741,13 @@ struct AddHandView: View {
         bestHand = heroHand
         bestPlayerId = heroPositionIndex
 
-        // Evaluate opponent hands
+        // Evaluate opponent hands (skip mucked opponents - they automatically lose)
         for opponent in opponentsAtShowdown {
+            // Skip mucked opponents
+            if muckedOpponents.contains(opponent.position.id) {
+                continue
+            }
+
             if let oppCards = opponentHands[opponent.position.id], oppCards.count == 2 {
                 let oppHand = HandEvaluator.evaluate(holeCards: oppCards, board: board)
                 if bestHand == nil || oppHand > bestHand! {
@@ -876,14 +882,23 @@ struct AddHandView: View {
             // Opponent hands
             ForEach(opponentsAtShowdown) { opponent in
                 let hasCards = opponentHands[opponent.position.id]?.count == 2
+                let hasMucked = muckedOpponents.contains(opponent.position.id)
 
                 HStack(spacing: 12) {
                     Text(opponent.position.shortName)
                         .font(.subheadline)
                         .fontWeight(.semibold)
-                        .frame(width: 80, alignment: .leading)
+                        .frame(width: 60, alignment: .leading)
 
-                    if hasCards, let cards = opponentHands[opponent.position.id] {
+                    if hasMucked {
+                        Text("MUCKED")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(Color.gray))
+                    } else if hasCards, let cards = opponentHands[opponent.position.id] {
                         HStack(spacing: 4) {
                             ForEach(cards) { card in
                                 CardView(card: card, size: .small)
@@ -902,7 +917,16 @@ struct AddHandView: View {
 
                     Spacer()
 
-                    if hasCards {
+                    if hasMucked {
+                        Button {
+                            muckedOpponents.remove(opponent.position.id)
+                            checkAndEvaluateWinner()
+                        } label: {
+                            Text("Undo")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
+                    } else if hasCards {
                         if let handDesc = getHandDescription(for: opponent.position.id) {
                             Text(handDesc)
                                 .font(.caption)
@@ -927,16 +951,29 @@ struct AddHandView: View {
                         }
                     } else {
                         Button {
+                            muckedOpponents.insert(opponent.position.id)
+                            checkAndEvaluateWinner()
+                        } label: {
+                            Text("Muck")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.gray)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(RoundedRectangle(cornerRadius: 6).stroke(Color.gray, lineWidth: 1))
+                        }
+
+                        Button {
                             selectedOpponentId = opponent.position.id
                             cardPickerType = .opponentCards
                             opponentHands[opponent.position.id] = []
                             showingCardPicker = true
                         } label: {
-                            Text("Enter Cards")
+                            Text("Cards")
                                 .font(.caption)
                                 .fontWeight(.medium)
                                 .foregroundColor(.white)
-                                .padding(.horizontal, 12)
+                                .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
                                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.black))
                         }
@@ -1158,7 +1195,7 @@ struct AddHandView: View {
         // Initial pot and bet to call
         pot = sb + bb
         currentBet = bb
-        actedThisRound = [1, 2] // SB and BB have "acted" by posting
+        actedThisRound = [] // SB and BB have posted but still need to act preflop
         phase = .action
     }
 
@@ -1399,6 +1436,15 @@ struct CardPickerView: View {
     let maxCards: Int
     let excludedCards: [Card]
 
+    private func suitColor(for suit: Suit) -> Color {
+        switch suit.colorName {
+        case "red": return .red
+        case "blue": return .blue
+        case "green": return Color(red: 0.0, green: 0.6, blue: 0.2)
+        default: return .black
+        }
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -1428,6 +1474,7 @@ struct CardPickerView: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text(suit.symbol)
                                     .font(.title2)
+                                    .foregroundColor(suitColor(for: suit))
 
                                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8) {
                                     ForEach(Rank.allCases, id: \.self) { rank in
@@ -1447,13 +1494,13 @@ struct CardPickerView: View {
                                                 .frame(width: 40, height: 50)
                                                 .background(
                                                     RoundedRectangle(cornerRadius: 6)
-                                                        .fill(isSelected ? Color.black : Color.white)
+                                                        .fill(isSelected ? suitColor(for: suit) : Color.white)
                                                 )
                                                 .overlay(
                                                     RoundedRectangle(cornerRadius: 6)
-                                                        .stroke(isExcluded ? Color.gray.opacity(0.2) : Color.black.opacity(0.3), lineWidth: 1)
+                                                        .stroke(isExcluded ? Color.gray.opacity(0.2) : suitColor(for: suit).opacity(0.5), lineWidth: 1)
                                                 )
-                                                .foregroundColor(isSelected ? .white : (isExcluded ? .gray.opacity(0.3) : .black))
+                                                .foregroundColor(isSelected ? .white : (isExcluded ? .gray.opacity(0.3) : suitColor(for: suit)))
                                         }
                                         .disabled(isExcluded)
                                     }

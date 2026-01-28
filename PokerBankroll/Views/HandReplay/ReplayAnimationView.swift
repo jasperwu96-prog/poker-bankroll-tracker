@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ReplayAnimationView: View {
     let hand: PokerHand
@@ -12,6 +13,7 @@ struct ReplayAnimationView: View {
     @State private var currentStreet: Street = .preflop
     @State private var showHoleCards = false
     @State private var completedSteps = 0
+    @State private var showShareAlert = false
 
     private var totalSteps: Int {
         // Steps: Show hole cards (1) + each action + board reveals
@@ -76,19 +78,34 @@ struct ReplayAnimationView: View {
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("POT")
-                    .font(.caption2)
-                    .foregroundColor(.gray)
-                Text("$\(Int(pot))")
-                    .font(.subheadline)
-                    .fontWeight(.bold)
+            HStack(spacing: 12) {
+                Button {
+                    shareHand()
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.title3)
+                        .foregroundColor(.black)
+                }
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("POT")
+                        .font(.caption2)
+                        .foregroundColor(.gray)
+                    Text("$\(Int(pot))")
+                        .font(.subheadline)
+                        .fontWeight(.bold)
+                }
             }
             .padding(.trailing, 8)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(Color.white)
+        .alert("Hand Copied!", isPresented: $showShareAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Hand history has been copied to clipboard. Share it anywhere!")
+        }
     }
 
     // MARK: - Table Area
@@ -552,6 +569,95 @@ struct ReplayAnimationView: View {
         formatter.maximumFractionDigits = 0
         let formatted = formatter.string(from: NSNumber(value: abs(value))) ?? "$0"
         return value >= 0 ? "+\(formatted)" : "-\(formatted)"
+    }
+
+    // MARK: - Share Hand
+
+    private func shareHand() {
+        let handHistory = generateHandHistory()
+        UIPasteboard.general.string = handHistory
+        showShareAlert = true
+    }
+
+    private func generateHandHistory() -> String {
+        var history = ""
+
+        // Header
+        history += "═══════════════════════════════\n"
+        history += "♠♥♦♣ POKER HAND HISTORY ♣♦♥♠\n"
+        history += "═══════════════════════════════\n\n"
+
+        // Game info
+        history += "Stakes: \(hand.stakes)\n"
+        history += "Date: \(hand.date.formatted(date: .abbreviated, time: .shortened))\n"
+        history += "Hero: \(hand.heroPosition)\n"
+        history += "Hole Cards: \(formatCards(hand.holeCards))\n\n"
+
+        // Actions by street
+        var currentStreet: Street?
+        for action in hand.actions {
+            if action.street != currentStreet {
+                currentStreet = action.street
+                history += "── \(action.street.rawValue.uppercased()) "
+
+                // Add board cards for this street
+                switch action.street {
+                case .preflop:
+                    history += "──\n"
+                case .flop:
+                    history += "[\(formatCards(hand.flop))] ──\n"
+                case .turn:
+                    if let turn = hand.turn {
+                        history += "[\(formatCards(hand.flop))] [\(formatCard(turn))] ──\n"
+                    }
+                case .river:
+                    if let turn = hand.turn, let river = hand.river {
+                        history += "[\(formatCards(hand.flop))] [\(formatCard(turn))] [\(formatCard(river))] ──\n"
+                    }
+                }
+            }
+
+            // Action line
+            let heroMarker = action.isHero ? " ★" : ""
+            if let amount = action.amount, amount > 0 {
+                history += "  \(action.position)\(heroMarker): \(action.action.rawValue) $\(Int(amount))\n"
+            } else {
+                history += "  \(action.position)\(heroMarker): \(action.action.rawValue)\n"
+            }
+        }
+
+        // Final board
+        if !hand.board.isEmpty {
+            history += "\n── FINAL BOARD ──\n"
+            history += "  \(formatCards(hand.board))\n"
+        }
+
+        // Result
+        history += "\n═══════════════════════════════\n"
+        history += "POT: $\(Int(hand.potSize))\n"
+        let resultStr = hand.result >= 0 ? "+$\(Int(hand.result))" : "-$\(Int(abs(hand.result)))"
+        history += "RESULT: \(resultStr) \(hand.result >= 0 ? "WIN" : "LOSS")\n"
+
+        if let winner = hand.winner {
+            history += "WINNER: \(winner)\n"
+        }
+
+        history += "═══════════════════════════════\n"
+
+        // Notes
+        if !hand.notes.isEmpty {
+            history += "\nNotes: \(hand.notes)\n"
+        }
+
+        return history
+    }
+
+    private func formatCards(_ cards: [Card]) -> String {
+        cards.map { formatCard($0) }.joined(separator: " ")
+    }
+
+    private func formatCard(_ card: Card) -> String {
+        "\(card.rank.display)\(card.suit.symbol)"
     }
 }
 
