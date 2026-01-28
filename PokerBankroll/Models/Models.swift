@@ -297,6 +297,7 @@ struct PokerHand: Codable, Identifiable {
     var result: Double
     var notes: String
     var winner: String?
+    var playerStacks: [String: Double]? // Position -> Stack size
 
     init(
         id: UUID = UUID(),
@@ -309,7 +310,8 @@ struct PokerHand: Codable, Identifiable {
         potSize: Double = 0,
         result: Double = 0,
         notes: String = "",
-        winner: String? = nil
+        winner: String? = nil,
+        playerStacks: [String: Double]? = nil
     ) {
         self.id = id
         self.date = date
@@ -322,6 +324,7 @@ struct PokerHand: Codable, Identifiable {
         self.result = result
         self.notes = notes
         self.winner = winner
+        self.playerStacks = playerStacks
     }
 
     var flop: [Card] {

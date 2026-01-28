@@ -27,6 +27,10 @@ struct AddHandView: View {
     @State private var opponentHands: [Int: [Card]] = [:] // Store opponent hole cards for showdown
     @State private var selectedOpponentId: Int? = nil // Currently selecting cards for this opponent
     @State private var muckedOpponents: Set<Int> = [] // Opponents who mucked their hands
+    @State private var playerStacks: [Int: Double] = [:] // Position ID -> Stack size
+    @State private var showingStackInput = false
+    @State private var editingStackPositionId: Int? = nil
+    @State private var stackInputAmount = ""
 
     // Computed blinds from stakes
     private var smallBlind: Double {
@@ -173,6 +177,8 @@ struct AddHandView: View {
             heroPositionSelector
             Divider()
             holeCardsSelector
+            Divider()
+            stackSizesSelector
 
             Spacer().frame(height: 20)
 
@@ -190,6 +196,90 @@ struct AddHandView: View {
             }
             .disabled(holeCards.count != 2)
         }
+        .alert("Enter Stack Size", isPresented: $showingStackInput) {
+            TextField("Stack ($)", text: $stackInputAmount)
+                .keyboardType(.decimalPad)
+            Button("Cancel", role: .cancel) { stackInputAmount = "" }
+            Button("Save") { saveStackSize() }
+        } message: {
+            if let posId = editingStackPositionId {
+                Text("Stack for \(PlayerPosition.allPositions[posId].shortName)")
+            }
+        }
+    }
+
+    private var stackSizesSelector: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("STACK SIZES")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .tracking(1)
+                    .foregroundColor(.gray)
+
+                Spacer()
+
+                Text("Tap position to edit")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+            }
+
+            // Mini table view for stack entry
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                ForEach(PlayerPosition.allPositions) { position in
+                    let stack = playerStacks[position.id]
+                    let isHero = position.id == heroPositionIndex
+
+                    Button {
+                        editingStackPositionId = position.id
+                        stackInputAmount = stack != nil ? "\(Int(stack!))" : ""
+                        showingStackInput = true
+                    } label: {
+                        VStack(spacing: 4) {
+                            Text(position.shortName)
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundColor(isHero ? .white : .black)
+
+                            if let stack = stack {
+                                Text("$\(Int(stack))")
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(isHero ? .white.opacity(0.8) : .gray)
+                            } else {
+                                Text("--")
+                                    .font(.caption2)
+                                    .foregroundColor(isHero ? .white.opacity(0.5) : .gray.opacity(0.5))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(isHero ? Color.black : Color.white)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(stack != nil ? Color.black : Color.gray.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                }
+            }
+
+            Text("Optional: Enter stack sizes for more accurate tracking")
+                .font(.caption2)
+                .foregroundColor(.gray)
+        }
+    }
+
+    private func saveStackSize() {
+        guard let posId = editingStackPositionId,
+              let amount = Double(stackInputAmount), amount > 0 else {
+            stackInputAmount = ""
+            return
+        }
+        playerStacks[posId] = amount
+        stackInputAmount = ""
     }
 
     private var sessionPicker: some View {
@@ -1145,11 +1235,15 @@ struct AddHandView: View {
     }
 
     private func startRecording() {
-        // Update hero
+        // Update hero and apply stack sizes
         for i in players.indices {
             players[i].isHero = players[i].position.id == heroPositionIndex
             if players[i].isHero {
                 players[i].cards = holeCards
+            }
+            // Apply stack sizes
+            if let stack = playerStacks[players[i].position.id] {
+                players[i].stack = stack
             }
         }
 
@@ -1410,6 +1504,13 @@ struct AddHandView: View {
         let heroPosition = PlayerPosition.allPositions[heroPositionIndex].shortName
         let winnerPosition = winnerPositionId != nil ? PlayerPosition.allPositions.first(where: { $0.id == winnerPositionId })?.shortName : nil
 
+        // Convert position IDs to position names for stacks
+        var stacksByPosition: [String: Double] = [:]
+        for (posId, stack) in playerStacks {
+            let posName = PlayerPosition.allPositions[posId].shortName
+            stacksByPosition[posName] = stack
+        }
+
         let hand = PokerHand(
             date: Date(),
             stakes: stakesOptions[selectedStakesIndex],
@@ -1420,7 +1521,8 @@ struct AddHandView: View {
             potSize: pot,
             result: calculatedResult,
             notes: notes,
-            winner: winnerPosition
+            winner: winnerPosition,
+            playerStacks: stacksByPosition.isEmpty ? nil : stacksByPosition
         )
 
         dataStore.addHand(hand, to: session.id)

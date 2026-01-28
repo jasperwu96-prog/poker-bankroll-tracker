@@ -101,10 +101,10 @@ struct ReplayAnimationView: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(Color.white)
-        .alert("Hand Copied!", isPresented: $showShareAlert) {
+        .alert("Replayer Copied!", isPresented: $showShareAlert) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text("Hand history has been copied to clipboard. Share it anywhere!")
+            Text("Interactive hand replayer copied! Paste into a .html file and open in any browser to play.")
         }
     }
 
@@ -574,91 +574,260 @@ struct ReplayAnimationView: View {
     // MARK: - Share Hand
 
     private func shareHand() {
-        let handHistory = generateHandHistory()
-        UIPasteboard.general.string = handHistory
+        let htmlReplayer = generateHTMLReplayer()
+        UIPasteboard.general.string = htmlReplayer
         showShareAlert = true
     }
 
-    private func generateHandHistory() -> String {
-        var history = ""
+    private func generateHTMLReplayer() -> String {
+        // Convert hand data to JSON-safe format
+        let holeCardsJS = hand.holeCards.map { "'\($0.rank.display)\(getSuitSymbol($0.suit))'" }.joined(separator: ", ")
+        let boardJS = hand.board.map { "'\($0.rank.display)\(getSuitSymbol($0.suit))'" }.joined(separator: ", ")
 
-        // Header
-        history += "═══════════════════════════════\n"
-        history += "♠♥♦♣ POKER HAND HISTORY ♣♦♥♠\n"
-        history += "═══════════════════════════════\n\n"
-
-        // Game info
-        history += "Stakes: \(hand.stakes)\n"
-        history += "Date: \(hand.date.formatted(date: .abbreviated, time: .shortened))\n"
-        history += "Hero: \(hand.heroPosition)\n"
-        history += "Hole Cards: \(formatCards(hand.holeCards))\n\n"
-
-        // Actions by street
-        var currentStreet: Street?
-        for action in hand.actions {
-            if action.street != currentStreet {
-                currentStreet = action.street
-                history += "── \(action.street.rawValue.uppercased()) "
-
-                // Add board cards for this street
-                switch action.street {
-                case .preflop:
-                    history += "──\n"
-                case .flop:
-                    history += "[\(formatCards(hand.flop))] ──\n"
-                case .turn:
-                    if let turn = hand.turn {
-                        history += "[\(formatCards(hand.flop))] [\(formatCard(turn))] ──\n"
-                    }
-                case .river:
-                    if let turn = hand.turn, let river = hand.river {
-                        history += "[\(formatCards(hand.flop))] [\(formatCard(turn))] [\(formatCard(river))] ──\n"
-                    }
-                }
-            }
-
-            // Action line
-            let heroMarker = action.isHero ? " ★" : ""
-            if let amount = action.amount, amount > 0 {
-                history += "  \(action.position)\(heroMarker): \(action.action.rawValue) $\(Int(amount))\n"
-            } else {
-                history += "  \(action.position)\(heroMarker): \(action.action.rawValue)\n"
-            }
+        var actionsJS = "["
+        for (index, action) in hand.actions.enumerated() {
+            let amountStr = action.amount != nil ? "\(Int(action.amount!))" : "null"
+            actionsJS += "{street:'\(action.street.rawValue)',pos:'\(action.position)',action:'\(action.action.rawValue)',amount:\(amountStr),hero:\(action.isHero)}"
+            if index < hand.actions.count - 1 { actionsJS += "," }
         }
+        actionsJS += "]"
 
-        // Final board
-        if !hand.board.isEmpty {
-            history += "\n── FINAL BOARD ──\n"
-            history += "  \(formatCards(hand.board))\n"
-        }
+        return """
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Poker Hand - \(hand.stakes) - \(hand.heroPosition)</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000;min-height:100vh;display:flex;flex-direction:column}
+.container{max-width:500px;margin:0 auto;padding:16px;width:100%}
+.header{text-align:center;padding:12px;border-bottom:1px solid #eee}
+.header h2{font-size:18px;margin-bottom:4px}
+.header .sub{color:#666;font-size:13px}
+.table-area{position:relative;width:100%;padding-top:70%;margin:16px 0}
+.table{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:65%;height:60%;border:3px solid #000;border-radius:50%;background:#fafafa}
+.pot{position:absolute;top:55%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:4px 12px;border-radius:20px;font-weight:bold;font-size:14px;box-shadow:0 2px 4px rgba(0,0,0,.1)}
+.board{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);display:flex;gap:4px}
+.card{width:32px;height:44px;background:#fff;border:1px solid #ddd;border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:bold;box-shadow:0 1px 2px rgba(0,0,0,.1)}
+.card.empty{border:1px dashed #ccc;background:transparent}
+.card.s,.card.c{color:#000}
+.card.h{color:#e53935}
+.card.d{color:#1e88e5}
+.card.club{color:#2e7d32}
+.player{position:absolute;text-align:center;transform:translate(-50%,-50%)}
+.player .badge{padding:6px 10px;border-radius:8px;font-size:11px;font-weight:bold;background:#fff;border:1px solid #ddd;min-width:50px}
+.player.hero .badge{background:#000;color:#fff;border-color:#000}
+.player.folded .badge{opacity:.4}
+.player .action{font-size:9px;color:#666;margin-top:2px}
+.player .cards{display:flex;gap:2px;justify-content:center;margin-bottom:4px}
+.player .cards .card{width:24px;height:32px;font-size:9px}
+.action-display{text-align:center;padding:16px;min-height:80px}
+.action-display .street{display:flex;gap:12px;justify-content:center;margin-bottom:12px}
+.action-display .street span{font-size:12px;color:#999}
+.action-display .street span.active{color:#000;font-weight:bold}
+.action-display .current{font-size:16px;font-weight:bold}
+.action-display .current .pos{display:inline-block;padding:4px 10px;border-radius:6px;background:#eee;margin-right:8px}
+.action-display .current .pos.hero{background:#000;color:#fff}
+.controls{display:flex;justify-content:center;gap:16px;padding:16px;border-top:1px solid #eee}
+.controls button{width:44px;height:44px;border-radius:50%;border:none;background:#fff;font-size:18px;cursor:pointer;border:1px solid #ddd}
+.controls button.play{width:56px;height:56px;background:#000;color:#fff;font-size:20px;border:none}
+.progress{height:4px;background:#eee;margin:0 16px}
+.progress .bar{height:100%;background:#000;transition:width .3s}
+.result{text-align:center;padding:16px;font-size:18px;font-weight:bold}
+.result.win{color:#000}
+.result.loss{color:#666}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<h2>\(hand.stakes) - Hero: \(hand.heroPosition)</h2>
+<div class="sub">\(hand.date.formatted(date: .abbreviated, time: .shortened))</div>
+</div>
+<div class="table-area">
+<div class="table"></div>
+<div class="board" id="board"></div>
+<div class="pot" id="pot">$0</div>
+<div id="players"></div>
+</div>
+<div class="action-display">
+<div class="street" id="street">
+<span class="active">Preflop</span><span>Flop</span><span>Turn</span><span>River</span>
+</div>
+<div class="current" id="current">Press play to start</div>
+</div>
+<div class="progress"><div class="bar" id="progress" style="width:0%"></div></div>
+<div class="controls">
+<button onclick="reset()">⏮</button>
+<button onclick="prev()">⏪</button>
+<button class="play" onclick="togglePlay()" id="playBtn">▶</button>
+<button onclick="next()">⏩</button>
+<button onclick="end()">⏭</button>
+</div>
+<div class="result" id="result"></div>
+</div>
+<script>
+const positions=[
+{id:0,name:'BTN',angle:270},{id:1,name:'SB',angle:310},{id:2,name:'BB',angle:350},
+{id:3,name:'UTG',angle:30},{id:4,name:'UTG+1',angle:70},{id:5,name:'MP',angle:110},
+{id:6,name:'MP+1',angle:150},{id:7,name:'HJ',angle:190},{id:8,name:'CO',angle:230}
+];
+const heroPos='\(hand.heroPosition)';
+const holeCards=[\(holeCardsJS)];
+const board=[\(boardJS)];
+const actions=\(actionsJS);
+const potSize=\(Int(hand.potSize));
+const result=\(Int(hand.result));
 
-        // Result
-        history += "\n═══════════════════════════════\n"
-        history += "POT: $\(Int(hand.potSize))\n"
-        let resultStr = hand.result >= 0 ? "+$\(Int(hand.result))" : "-$\(Int(abs(hand.result)))"
-        history += "RESULT: \(resultStr) \(hand.result >= 0 ? "WIN" : "LOSS")\n"
+let step=-1,playing=false,pot=0,players={},visibleBoard=0,timer=null;
 
-        if let winner = hand.winner {
-            history += "WINNER: \(winner)\n"
-        }
+function getSuitClass(c){const s=c.slice(-1);return s=='♠'?'s':s=='♥'?'h':s=='♦'?'d':'club'}
+function renderCard(c,empty){
+if(empty)return'<div class="card empty"></div>';
+return'<div class="card '+getSuitClass(c)+'">'+c.slice(0,-1)+'<br>'+c.slice(-1)+'</div>';
+}
 
-        history += "═══════════════════════════════\n"
+function initPlayers(){
+const area=document.querySelector('.table-area');
+const w=area.offsetWidth,h=area.offsetHeight;
+const cx=w/2,cy=h/2,rx=w*.38,ry=h*.32;
+let html='';
+positions.forEach(p=>{
+const a=p.angle*Math.PI/180;
+const x=cx+rx*Math.cos(a),y=cy+ry*Math.sin(a);
+const isHero=p.name===heroPos;
+players[p.name]={folded:false,action:null,bet:0};
+html+='<div class="player'+(isHero?' hero':'')+'" id="p'+p.id+'" style="left:'+x+'px;top:'+y+'px">';
+if(isHero)html+='<div class="cards">'+holeCards.map(c=>renderCard(c)).join('')+'</div>';
+html+='<div class="badge">'+p.name+'</div><div class="action"></div></div>';
+});
+document.getElementById('players').innerHTML=html;
+}
 
-        // Notes
-        if !hand.notes.isEmpty {
-            history += "\nNotes: \(hand.notes)\n"
-        }
+function updateBoard(){
+let html='';
+for(let i=0;i<5;i++)html+=renderCard(i<visibleBoard?board[i]:null,i>=visibleBoard);
+document.getElementById('board').innerHTML=html;
+}
 
-        return history
+function updateStreet(s){
+const spans=document.querySelectorAll('.street span');
+const streets=['Preflop','Flop','Turn','River'];
+spans.forEach((sp,i)=>sp.className=streets[i]===s?'active':'');
+}
+
+function updatePlayer(pos,action,folded){
+const p=positions.find(x=>x.name===pos);
+if(!p)return;
+const el=document.getElementById('p'+p.id);
+if(folded)el.classList.add('folded');
+el.querySelector('.action').textContent=action||'';
+}
+
+function showAction(a){
+let html='<span class="pos'+(a.hero?' hero':'')+'">'+a.pos+'</span> '+a.action;
+if(a.amount)html+=' $'+a.amount;
+document.getElementById('current').innerHTML=html;
+}
+
+function updateProgress(){
+const total=1+actions.length+(board.length>2?1:0)+(board.length>3?1:0)+(board.length>4?1:0);
+const pct=Math.min(100,((step+1)/total)*100);
+document.getElementById('progress').style.width=pct+'%';
+}
+
+function next(){
+if(step<0){step=0;initPlayers();updateBoard();document.getElementById('pot').textContent='$0';pot=0;}
+if(step<actions.length){
+const a=actions[step];
+// Check for street change - reveal board
+if(step>0){
+const prev=actions[step-1];
+if(a.street!==prev.street){
+if(a.street==='Flop'&&visibleBoard<3){visibleBoard=3;updateBoard();}
+else if(a.street==='Turn'&&visibleBoard<4){visibleBoard=4;updateBoard();}
+else if(a.street==='River'&&visibleBoard<5){visibleBoard=5;updateBoard();}
+}
+}
+updateStreet(a.street);
+showAction(a);
+if(a.action==='Fold'){players[a.pos].folded=true;updatePlayer(a.pos,'Fold',true);}
+else{updatePlayer(a.pos,a.action+(a.amount?' $'+a.amount:''),false);}
+if(a.amount)pot+=a.amount;
+document.getElementById('pot').textContent='$'+pot;
+step++;
+updateProgress();
+return true;
+}
+// Reveal remaining board
+if(visibleBoard<board.length){
+if(visibleBoard<3&&board.length>=3){visibleBoard=3;updateBoard();updateStreet('Flop');updateProgress();return true;}
+if(visibleBoard<4&&board.length>=4){visibleBoard=4;updateBoard();updateStreet('Turn');updateProgress();return true;}
+if(visibleBoard<5&&board.length>=5){visibleBoard=5;updateBoard();updateStreet('River');updateProgress();return true;}
+}
+// Show result
+document.getElementById('result').innerHTML=(result>=0?'+':'')+result;
+document.getElementById('result').className='result '+(result>=0?'win':'loss');
+updateProgress();
+return false;
+}
+
+function prev(){
+if(step<=0)return;
+step=Math.max(-1,step-2);
+reset();
+for(let i=0;i<=step;i++)next();
+}
+
+function reset(){
+step=-1;pot=0;visibleBoard=0;
+Object.keys(players).forEach(k=>players[k]={folded:false,action:null,bet:0});
+document.getElementById('current').textContent='Press play to start';
+document.getElementById('pot').textContent='$0';
+document.getElementById('result').textContent='';
+document.getElementById('progress').style.width='0%';
+updateStreet('Preflop');
+initPlayers();
+updateBoard();
+}
+
+function end(){
+stop();
+reset();
+while(next()){}
+}
+
+function togglePlay(){
+if(playing)stop();
+else{playing=true;document.getElementById('playBtn').textContent='⏸';play();}
+}
+
+function play(){
+if(!playing)return;
+if(next())timer=setTimeout(play,1200);
+else stop();
+}
+
+function stop(){
+playing=false;
+document.getElementById('playBtn').textContent='▶';
+if(timer)clearTimeout(timer);
+}
+
+window.onload=()=>{initPlayers();updateBoard();};
+window.onresize=()=>{initPlayers();};
+</script>
+</body>
+</html>
+"""
     }
 
-    private func formatCards(_ cards: [Card]) -> String {
-        cards.map { formatCard($0) }.joined(separator: " ")
+    private func getSuitSymbol(_ suit: Suit) -> String {
+        suit.symbol
     }
 
-    private func formatCard(_ card: Card) -> String {
-        "\(card.rank.display)\(card.suit.symbol)"
-    }
 }
 
 // MARK: - Replay Player View
