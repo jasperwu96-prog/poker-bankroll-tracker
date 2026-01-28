@@ -8,15 +8,17 @@ struct PlayerPosition: Identifiable {
     let shortName: String
     let angle: Double // Angle around the table
 
+    // 9 positions evenly distributed (40 degrees apart)
+    // BTN at bottom (270°), going clockwise
     static let allPositions: [PlayerPosition] = [
         PlayerPosition(id: 0, name: "Dealer", shortName: "BTN", angle: 270),
         PlayerPosition(id: 1, name: "Small Blind", shortName: "SB", angle: 310),
         PlayerPosition(id: 2, name: "Big Blind", shortName: "BB", angle: 350),
         PlayerPosition(id: 3, name: "Under the Gun", shortName: "UTG", angle: 30),
-        PlayerPosition(id: 4, name: "UTG+1", shortName: "UTG+1", angle: 60),
-        PlayerPosition(id: 5, name: "Middle Position", shortName: "MP", angle: 90),
-        PlayerPosition(id: 6, name: "MP+1", shortName: "MP+1", angle: 120),
-        PlayerPosition(id: 7, name: "Hijack", shortName: "HJ", angle: 150),
+        PlayerPosition(id: 4, name: "UTG+1", shortName: "UTG+1", angle: 70),
+        PlayerPosition(id: 5, name: "Middle Position", shortName: "MP", angle: 110),
+        PlayerPosition(id: 6, name: "MP+1", shortName: "MP+1", angle: 150),
+        PlayerPosition(id: 7, name: "Hijack", shortName: "HJ", angle: 190),
         PlayerPosition(id: 8, name: "Cutoff", shortName: "CO", angle: 230),
     ]
 }

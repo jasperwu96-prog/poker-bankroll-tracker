@@ -24,6 +24,8 @@ struct AddHandView: View {
     @State private var actedThisRound: Set<Int> = []
     @State private var playerContributions: [Int: Double] = [:] // Track each player's total contributions
     @State private var winnerPositionId: Int? = nil // Who won the hand
+    @State private var opponentHands: [Int: [Card]] = [:] // Store opponent hole cards for showdown
+    @State private var selectedOpponentId: Int? = nil // Currently selecting cards for this opponent
 
     // Computed blinds from stakes
     private var smallBlind: Double {
@@ -55,7 +57,7 @@ struct AddHandView: View {
     }
 
     enum CardPickerType {
-        case holeCards, flop, turn, river
+        case holeCards, flop, turn, river, opponentCards
     }
 
     // Preflop order: UTG(3), UTG+1(4), MP(5), MP+1(6), HJ(7), CO(8), BTN(0), SB(1), BB(2)
@@ -693,6 +695,21 @@ struct AddHandView: View {
         players.filter { !$0.isFolded }
     }
 
+    private var isShowdown: Bool {
+        activePlayers.count > 1
+    }
+
+    private var opponentsAtShowdown: [PlayerState] {
+        activePlayers.filter { !$0.isHero }
+    }
+
+    private var allShowdownHandsEntered: Bool {
+        guard isShowdown else { return true }
+        return opponentsAtShowdown.allSatisfy { opponent in
+            opponentHands[opponent.position.id]?.count == 2
+        }
+    }
+
     private var heroContribution: Double {
         playerContributions[heroPositionIndex] ?? 0
     }
@@ -700,12 +717,51 @@ struct AddHandView: View {
     private var calculatedResult: Double {
         guard let winnerId = winnerPositionId else { return 0 }
         if winnerId == heroPositionIndex {
-            // Hero won - profit is pot minus their contribution
             return pot - heroContribution
         } else {
-            // Hero lost - loss is their total contribution
             return -heroContribution
         }
+    }
+
+    private func evaluateWinner() {
+        guard isShowdown && allShowdownHandsEntered && board.count >= 3 else { return }
+
+        var bestHand: EvaluatedHand?
+        var bestPlayerId: Int?
+
+        // Evaluate hero's hand
+        let heroHand = HandEvaluator.evaluate(holeCards: holeCards, board: board)
+        bestHand = heroHand
+        bestPlayerId = heroPositionIndex
+
+        // Evaluate opponent hands
+        for opponent in opponentsAtShowdown {
+            if let oppCards = opponentHands[opponent.position.id], oppCards.count == 2 {
+                let oppHand = HandEvaluator.evaluate(holeCards: oppCards, board: board)
+                if bestHand == nil || oppHand > bestHand! {
+                    bestHand = oppHand
+                    bestPlayerId = opponent.position.id
+                }
+            }
+        }
+
+        winnerPositionId = bestPlayerId
+    }
+
+    private func getHandDescription(for playerId: Int) -> String? {
+        guard board.count >= 3 else { return nil }
+
+        let cards: [Card]
+        if playerId == heroPositionIndex {
+            cards = holeCards
+        } else if let oppCards = opponentHands[playerId], oppCards.count == 2 {
+            cards = oppCards
+        } else {
+            return nil
+        }
+
+        let evaluated = HandEvaluator.evaluate(holeCards: cards, board: board)
+        return evaluated.ranking.displayName
     }
 
     private var resultPhase: some View {
@@ -744,79 +800,17 @@ struct AddHandView: View {
 
             Divider()
 
-            // Winner selection
-            VStack(alignment: .leading, spacing: 12) {
-                Text("WHO WON?")
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .tracking(1)
-                    .foregroundColor(.gray)
-
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                    ForEach(activePlayers) { player in
-                        Button {
-                            winnerPositionId = player.position.id
-                        } label: {
-                            VStack(spacing: 4) {
-                                Text(player.position.shortName)
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                if player.isHero {
-                                    Text("(You)")
-                                        .font(.caption2)
-                                        .foregroundColor(winnerPositionId == player.position.id ? .white.opacity(0.7) : .gray)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(winnerPositionId == player.position.id ? Color.black : Color.white)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.black, lineWidth: 1)
-                            )
-                            .foregroundColor(winnerPositionId == player.position.id ? .white : .black)
-                        }
-                    }
-                }
+            // Showdown: Enter opponent hands
+            if isShowdown {
+                showdownHandEntry
+            } else {
+                // No showdown - manually select winner
+                manualWinnerSelection
             }
 
             // Auto-calculated result
             if winnerPositionId != nil {
-                VStack(spacing: 8) {
-                    Text("YOUR RESULT")
-                        .font(.caption2)
-                        .fontWeight(.medium)
-                        .tracking(1)
-                        .foregroundColor(.gray)
-
-                    HStack {
-                        Text(calculatedResult >= 0 ? "+$\(Int(calculatedResult))" : "-$\(Int(abs(calculatedResult)))")
-                            .font(.title)
-                            .fontWeight(.bold)
-                            .foregroundColor(calculatedResult >= 0 ? .black : .gray)
-
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("You put in: $\(Int(heroContribution))")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                            if calculatedResult >= 0 {
-                                Text("Won pot: $\(Int(pot))")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                    }
-                    .padding()
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(calculatedResult >= 0 ? Color.black.opacity(0.05) : Color.gray.opacity(0.1))
-                    )
-                }
+                resultDisplay
             }
 
             // Notes
@@ -832,6 +826,209 @@ struct AddHandView: View {
                     .padding()
                     .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.03)))
             }
+        }
+    }
+
+    private var showdownHandEntry: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("SHOWDOWN - ENTER HANDS")
+                .font(.caption2)
+                .fontWeight(.medium)
+                .tracking(1)
+                .foregroundColor(.gray)
+
+            // Hero's hand (already known)
+            HStack(spacing: 12) {
+                Text("You (\(PlayerPosition.allPositions[heroPositionIndex].shortName))")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .frame(width: 80, alignment: .leading)
+
+                HStack(spacing: 4) {
+                    ForEach(holeCards) { card in
+                        CardView(card: card, size: .small)
+                    }
+                }
+
+                Spacer()
+
+                if let handDesc = getHandDescription(for: heroPositionIndex) {
+                    Text(handDesc)
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+
+                if winnerPositionId == heroPositionIndex {
+                    Image(systemName: "crown.fill")
+                        .foregroundColor(.black)
+                        .font(.caption)
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.05)))
+
+            // Opponent hands
+            ForEach(opponentsAtShowdown) { opponent in
+                let hasCards = opponentHands[opponent.position.id]?.count == 2
+
+                HStack(spacing: 12) {
+                    Text(opponent.position.shortName)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .frame(width: 80, alignment: .leading)
+
+                    if hasCards, let cards = opponentHands[opponent.position.id] {
+                        HStack(spacing: 4) {
+                            ForEach(cards) { card in
+                                CardView(card: card, size: .small)
+                            }
+                        }
+                    } else {
+                        HStack(spacing: 4) {
+                            ForEach(0..<2, id: \.self) { _ in
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(style: StrokeStyle(lineWidth: 1, dash: [3]))
+                                    .foregroundColor(.gray.opacity(0.4))
+                                    .frame(width: 28, height: 38)
+                            }
+                        }
+                    }
+
+                    Spacer()
+
+                    if hasCards {
+                        if let handDesc = getHandDescription(for: opponent.position.id) {
+                            Text(handDesc)
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
+
+                        if winnerPositionId == opponent.position.id {
+                            Image(systemName: "crown.fill")
+                                .foregroundColor(.black)
+                                .font(.caption)
+                        }
+
+                        Button {
+                            selectedOpponentId = opponent.position.id
+                            cardPickerType = .opponentCards
+                            opponentHands[opponent.position.id] = []
+                            showingCardPicker = true
+                        } label: {
+                            Text("Change")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
+                    } else {
+                        Button {
+                            selectedOpponentId = opponent.position.id
+                            cardPickerType = .opponentCards
+                            opponentHands[opponent.position.id] = []
+                            showingCardPicker = true
+                        } label: {
+                            Text("Enter Cards")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.black))
+                        }
+                    }
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.03)))
+            }
+
+            if allShowdownHandsEntered {
+                Button {
+                    evaluateWinner()
+                } label: {
+                    Text("Determine Winner")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.black)
+                        .cornerRadius(12)
+                }
+            }
+        }
+    }
+
+    private var manualWinnerSelection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("WHO WON?")
+                .font(.caption2)
+                .fontWeight(.medium)
+                .tracking(1)
+                .foregroundColor(.gray)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                ForEach(activePlayers) { player in
+                    Button {
+                        winnerPositionId = player.position.id
+                    } label: {
+                        VStack(spacing: 4) {
+                            Text(player.position.shortName)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            if player.isHero {
+                                Text("(You)")
+                                    .font(.caption2)
+                                    .foregroundColor(winnerPositionId == player.position.id ? .white.opacity(0.7) : .gray)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(winnerPositionId == player.position.id ? Color.black : Color.white)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.black, lineWidth: 1)
+                        )
+                        .foregroundColor(winnerPositionId == player.position.id ? .white : .black)
+                    }
+                }
+            }
+        }
+    }
+
+    private var resultDisplay: some View {
+        VStack(spacing: 8) {
+            Text("YOUR RESULT")
+                .font(.caption2)
+                .fontWeight(.medium)
+                .tracking(1)
+                .foregroundColor(.gray)
+
+            HStack {
+                Text(calculatedResult >= 0 ? "+$\(Int(calculatedResult))" : "-$\(Int(abs(calculatedResult)))")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .foregroundColor(calculatedResult >= 0 ? .black : .gray)
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("You put in: $\(Int(heroContribution))")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    if calculatedResult >= 0 {
+                        Text("Won pot: $\(Int(pot))")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(calculatedResult >= 0 ? Color.black.opacity(0.05) : Color.gray.opacity(0.1))
+            )
         }
     }
 
@@ -862,6 +1059,15 @@ struct AddHandView: View {
                     else if board.count > 4 { board[4] = card }
                 }}
             )
+        case .opponentCards:
+            return Binding(
+                get: { selectedOpponentId.flatMap { opponentHands[$0] } ?? [] },
+                set: { cards in
+                    if let oppId = selectedOpponentId {
+                        opponentHands[oppId] = cards
+                    }
+                }
+            )
         }
     }
 
@@ -870,6 +1076,7 @@ struct AddHandView: View {
         case .holeCards: return 2
         case .flop: return 3
         case .turn, .river: return 1
+        case .opponentCards: return 2
         }
     }
 
@@ -879,6 +1086,17 @@ struct AddHandView: View {
         case .flop: return holeCards
         case .turn: return holeCards + Array(board.prefix(3))
         case .river: return holeCards + Array(board.prefix(4))
+        case .opponentCards:
+            // Exclude hero's cards, board cards, and other opponents' cards
+            var excluded = holeCards + board
+            for (_, cards) in opponentHands {
+                excluded += cards
+            }
+            // Remove current opponent's cards from excluded (allow reselection)
+            if let currentOppId = selectedOpponentId, let currentCards = opponentHands[currentOppId] {
+                excluded = excluded.filter { card in !currentCards.contains(card) }
+            }
+            return excluded
         }
     }
 

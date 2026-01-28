@@ -11,9 +11,10 @@ struct ReplayAnimationView: View {
     @State private var pot: Double = 0
     @State private var currentStreet: Street = .preflop
     @State private var showHoleCards = false
+    @State private var completedSteps = 0
 
     private var totalSteps: Int {
-        // Steps: Show hole cards (1) + each action
+        // Steps: Show hole cards (1) + each action + board reveals
         return 1 + hand.actions.count + boardRevealSteps
     }
 
@@ -315,8 +316,7 @@ struct ReplayAnimationView: View {
 
     private var progress: CGFloat {
         guard totalSteps > 0 else { return 0 }
-        let currentStep = max(0, currentActionIndex + 1 + (showHoleCards ? 1 : 0))
-        return CGFloat(currentStep) / CGFloat(totalSteps)
+        return CGFloat(completedSteps) / CGFloat(totalSteps)
     }
 
     private func setupPlayers() {
@@ -377,6 +377,7 @@ struct ReplayAnimationView: View {
         if !showHoleCards {
             withAnimation {
                 showHoleCards = true
+                completedSteps = 1
             }
             return true
         }
@@ -391,18 +392,21 @@ struct ReplayAnimationView: View {
                 withAnimation {
                     visibleBoardCards = 3
                     currentStreet = .flop
+                    completedSteps += 1
                 }
                 return true
             } else if nextAction.street == .turn && visibleBoardCards == 3 && hand.turn != nil {
                 withAnimation {
                     visibleBoardCards = 4
                     currentStreet = .turn
+                    completedSteps += 1
                 }
                 return true
             } else if nextAction.street == .river && visibleBoardCards == 4 && hand.river != nil {
                 withAnimation {
                     visibleBoardCards = 5
                     currentStreet = .river
+                    completedSteps += 1
                 }
                 return true
             }
@@ -413,6 +417,7 @@ struct ReplayAnimationView: View {
 
             withAnimation {
                 currentStreet = action.street
+                completedSteps += 1
 
                 // Update player state
                 if let index = players.firstIndex(where: { $0.position.shortName == action.position }) {
@@ -435,12 +440,15 @@ struct ReplayAnimationView: View {
                 if visibleBoardCards == 0 && hand.flop.count == 3 {
                     visibleBoardCards = 3
                     currentStreet = .flop
+                    completedSteps += 1
                 } else if visibleBoardCards == 3 && hand.turn != nil {
                     visibleBoardCards = 4
                     currentStreet = .turn
+                    completedSteps += 1
                 } else if visibleBoardCards == 4 && hand.river != nil {
                     visibleBoardCards = 5
                     currentStreet = .river
+                    completedSteps += 1
                 }
             }
             return true
@@ -450,6 +458,8 @@ struct ReplayAnimationView: View {
     }
 
     private func previousStep() {
+        guard completedSteps > 0 else { return }
+
         if currentActionIndex >= 0 {
             // Undo the current action
             let action = hand.actions[currentActionIndex]
@@ -462,6 +472,7 @@ struct ReplayAnimationView: View {
                 players[index].currentBet = 0
             }
             currentActionIndex -= 1
+            completedSteps -= 1
 
             // Update street
             if currentActionIndex >= 0 {
@@ -474,6 +485,7 @@ struct ReplayAnimationView: View {
             updateBoardVisibility()
         } else if showHoleCards {
             showHoleCards = false
+            completedSteps = 0
         }
     }
 
@@ -502,6 +514,7 @@ struct ReplayAnimationView: View {
         visibleBoardCards = 0
         pot = 0
         currentStreet = .preflop
+        completedSteps = 0
         setupPlayers()
     }
 
@@ -510,6 +523,7 @@ struct ReplayAnimationView: View {
         showHoleCards = true
         visibleBoardCards = hand.board.count
         currentActionIndex = hand.actions.count - 1
+        completedSteps = totalSteps
 
         if let lastAction = hand.actions.last {
             currentStreet = lastAction.street
