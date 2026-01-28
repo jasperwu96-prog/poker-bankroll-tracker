@@ -218,6 +218,13 @@ struct PlayerSeatView: View {
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundColor(player.isHero ? .white : (player.isFolded ? .gray : .black))
 
+                    // Stack size
+                    if player.stack > 0 {
+                        Text("$\(Int(player.stack))")
+                            .font(.system(size: 8, weight: .medium, design: .rounded))
+                            .foregroundColor(player.isHero ? .white.opacity(0.7) : .gray)
+                    }
+
                     if let action = player.lastAction {
                         Text(action.rawValue)
                             .font(.system(size: 8, weight: .medium))
@@ -225,7 +232,7 @@ struct PlayerSeatView: View {
                     }
 
                     if player.currentBet > 0 {
-                        Text("$\(Int(player.currentBet))")
+                        Text("Bet $\(Int(player.currentBet))")
                             .font(.system(size: 9, weight: .bold, design: .rounded))
                             .foregroundColor(player.isHero ? .white : .black)
                     }

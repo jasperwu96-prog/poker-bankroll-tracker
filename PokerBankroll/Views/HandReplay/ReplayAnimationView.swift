@@ -346,6 +346,10 @@ struct ReplayAnimationView: View {
             if position.shortName == hand.heroPosition {
                 state.cards = hand.holeCards
             }
+            // Load stack size if available
+            if let stacks = hand.playerStacks, let stack = stacks[position.shortName] {
+                state.stack = stack
+            }
             return state
         }
     }
@@ -592,6 +596,13 @@ struct ReplayAnimationView: View {
         }
         actionsJS += "]"
 
+        // Convert stacks to JS object
+        var stacksJS = "{}"
+        if let stacks = hand.playerStacks, !stacks.isEmpty {
+            let stackEntries = stacks.map { "'\($0.key)':\(Int($0.value))" }.joined(separator: ",")
+            stacksJS = "{\(stackEntries)}"
+        }
+
         return """
 <!DOCTYPE html>
 <html>
@@ -618,6 +629,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#fff;col
 .card.club{color:#2e7d32}
 .player{position:absolute;text-align:center;transform:translate(-50%,-50%)}
 .player .badge{padding:6px 10px;border-radius:8px;font-size:11px;font-weight:bold;background:#fff;border:1px solid #ddd;min-width:50px}
+.player .badge .stack{font-size:9px;font-weight:normal;opacity:.7}
 .player.hero .badge{background:#000;color:#fff;border-color:#000}
 .player.folded .badge{opacity:.4}
 .player .action{font-size:9px;color:#666;margin-top:2px}
@@ -678,6 +690,7 @@ const heroPos='\(hand.heroPosition)';
 const holeCards=[\(holeCardsJS)];
 const board=[\(boardJS)];
 const actions=\(actionsJS);
+const stacks=\(stacksJS);
 const potSize=\(Int(hand.potSize));
 const result=\(Int(hand.result));
 
@@ -698,10 +711,11 @@ positions.forEach(p=>{
 const a=p.angle*Math.PI/180;
 const x=cx+rx*Math.cos(a),y=cy+ry*Math.sin(a);
 const isHero=p.name===heroPos;
+const stack=stacks[p.name];
 players[p.name]={folded:false,action:null,bet:0};
 html+='<div class="player'+(isHero?' hero':'')+'" id="p'+p.id+'" style="left:'+x+'px;top:'+y+'px">';
 if(isHero)html+='<div class="cards">'+holeCards.map(c=>renderCard(c)).join('')+'</div>';
-html+='<div class="badge">'+p.name+'</div><div class="action"></div></div>';
+html+='<div class="badge">'+p.name+(stack?'<br><span class="stack">$'+stack+'</span>':'')+'</div><div class="action"></div></div>';
 });
 document.getElementById('players').innerHTML=html;
 }
@@ -854,6 +868,13 @@ struct ReplayPlayerView: View {
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundColor(player.isHero ? .white : (player.isFolded ? .gray : .black))
 
+                // Stack size
+                if player.stack > 0 {
+                    Text("$\(Int(player.stack))")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundColor(player.isHero ? .white.opacity(0.7) : .gray)
+                }
+
                 if let action = player.lastAction {
                     Text(action.rawValue)
                         .font(.system(size: 9, weight: .medium))
@@ -861,7 +882,7 @@ struct ReplayPlayerView: View {
                 }
 
                 if player.currentBet > 0 {
-                    Text("$\(Int(player.currentBet))")
+                    Text("Bet $\(Int(player.currentBet))")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundColor(player.isHero ? .white : .black)
                 }
