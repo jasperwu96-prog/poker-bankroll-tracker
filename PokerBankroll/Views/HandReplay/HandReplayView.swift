@@ -4,6 +4,7 @@ struct HandReplayView: View {
     @EnvironmentObject var dataStore: DataStore
     @State private var showingAddHand = false
     @State private var selectedHand: PokerHand?
+    @State private var replayHand: PokerHand?
 
     var body: some View {
         NavigationStack {
@@ -33,6 +34,9 @@ struct HandReplayView: View {
             }
             .sheet(item: $selectedHand) { hand in
                 HandDetailView(hand: hand)
+            }
+            .sheet(item: $replayHand) { hand in
+                ReplayAnimationView(hand: hand)
             }
         }
     }
@@ -67,11 +71,13 @@ struct HandReplayView: View {
     private var handsList: some View {
         List {
             ForEach(dataStore.allHands) { hand in
-                HandRowView(hand: hand)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        selectedHand = hand
-                    }
+                HandRowView(hand: hand, onPlayTap: {
+                    replayHand = hand
+                })
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selectedHand = hand
+                }
             }
         }
         .listStyle(.plain)
@@ -82,9 +88,20 @@ struct HandReplayView: View {
 
 struct HandRowView: View {
     let hand: PokerHand
+    var onPlayTap: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 12) {
+            // Play button
+            Button {
+                onPlayTap?()
+            } label: {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(.black)
+            }
+            .buttonStyle(.plain)
+
             // Hole Cards
             HStack(spacing: 4) {
                 ForEach(hand.holeCards) { card in
@@ -156,6 +173,15 @@ struct HandRowView: View {
 struct MiniCardView: View {
     let card: Card
 
+    private var suitColor: Color {
+        switch card.suit.colorName {
+        case "red": return .red
+        case "blue": return .blue
+        case "green": return Color(red: 0.0, green: 0.6, blue: 0.2)
+        default: return .black
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Text(card.rank.display)
@@ -163,7 +189,7 @@ struct MiniCardView: View {
             Text(card.suit.symbol)
                 .font(.system(size: 10))
         }
-        .foregroundColor(.black)
+        .foregroundColor(suitColor)
         .frame(width: 28, height: 36)
         .background(
             RoundedRectangle(cornerRadius: 4)

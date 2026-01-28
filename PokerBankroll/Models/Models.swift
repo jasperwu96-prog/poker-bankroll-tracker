@@ -16,6 +16,15 @@ enum Suit: String, Codable, CaseIterable {
         case .clubs: return "♣"
         }
     }
+
+    var colorName: String {
+        switch self {
+        case .spades: return "black"
+        case .hearts: return "red"
+        case .diamonds: return "blue"
+        case .clubs: return "green"
+        }
+    }
 }
 
 enum Rank: String, Codable, CaseIterable {

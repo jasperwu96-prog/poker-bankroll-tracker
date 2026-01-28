@@ -42,6 +42,15 @@ struct CardView: View {
     let card: Card
     var size: CardSize = .medium
 
+    private var suitColor: Color {
+        switch card.suit.colorName {
+        case "red": return .red
+        case "blue": return .blue
+        case "green": return Color(red: 0.0, green: 0.6, blue: 0.2)
+        default: return .black
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Text(card.rank.display)
@@ -49,7 +58,7 @@ struct CardView: View {
             Text(card.suit.symbol)
                 .font(size.suitFont)
         }
-        .foregroundColor(.black)
+        .foregroundColor(suitColor)
         .frame(width: size.width, height: size.height)
         .background(
             RoundedRectangle(cornerRadius: 6)

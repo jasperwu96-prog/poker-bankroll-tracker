@@ -723,6 +723,12 @@ struct AddHandView: View {
         }
     }
 
+    private func checkAndEvaluateWinner() {
+        if isShowdown && allShowdownHandsEntered {
+            evaluateWinner()
+        }
+    }
+
     private func evaluateWinner() {
         guard isShowdown && allShowdownHandsEntered && board.count >= 3 else { return }
 
@@ -940,20 +946,6 @@ struct AddHandView: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.03)))
             }
 
-            if allShowdownHandsEntered {
-                Button {
-                    evaluateWinner()
-                } label: {
-                    Text("Determine Winner")
-                        .font(.headline)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.black)
-                        .cornerRadius(12)
-                }
-            }
         }
     }
 
@@ -1065,6 +1057,12 @@ struct AddHandView: View {
                 set: { cards in
                     if let oppId = selectedOpponentId {
                         opponentHands[oppId] = cards
+                        // Auto-evaluate winner when opponent hand is complete
+                        if cards.count == 2 {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                checkAndEvaluateWinner()
+                            }
+                        }
                     }
                 }
             )
